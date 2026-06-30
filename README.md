@@ -2,6 +2,12 @@
 
 CLI helper for eBay listing work.
 
+## For non-terminal users
+
+Double-click `Launch ebayList.command`.
+
+The launcher installs the app dependencies if needed, then opens Shopify in a browser window. Complete Shopify login and any 2FA once; future launches reuse the saved browser session in `.auth/profile`.
+
 ## Setup
 
 ```sh
