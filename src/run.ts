@@ -27,7 +27,7 @@ export const runListingLoop = async (config: AppConfig) => {
     console.log("Edit tab ready.")
     const googlePage = await context.newPage() // reused each loop for the category lookup
 
-    console.log("Applying standard filters (No images, quantity >= 1, payment policy not set)...")
+    console.log("Applying standard filters (Has images, quantity >= 1, payment policy not set)...")
     await waitForFrameSettled(searchPage)
     const filters = await applyStandardFilters(searchPage)
     if (!filters.ok) {
@@ -59,19 +59,20 @@ export const runListingLoop = async (config: AppConfig) => {
       console.log(`Found ${sku} — ${title || "(no title)"}. Looking up eBay category on Google...`)
       await googlePage.goto(`https://www.google.com/search?q=${encodeURIComponent(`eBay category for ${title}`)}`)
 
-      const answer = (await rl.question(`\n${sku} — ${title || "(no title)"}\ncategory / skip / quit > `)).trim()
+      const choice = await promptAction(rl, sku, title)
 
-      if (/^quit$/i.test(answer)) {
+      if (choice.action === "quit") {
         console.log(`Quitting. Listed ${listedCount} product(s) this run.`)
         break
       }
 
-      if (!answer || /^skip$/i.test(answer)) {
+      if (choice.action === "skip") {
         console.log(`Skipped ${sku}.`)
         lastSku = sku
         continue
       }
 
+      const answer = choice.category
       console.log(`Setting category "${answer}" for ${sku}...`)
       await waitForFrameSettled(editPage)
       const category = await setEbayCategory(editPage, sku, answer)
@@ -97,6 +98,44 @@ export const runListingLoop = async (config: AppConfig) => {
     console.log("Closing browser...")
     rl.close()
     await context.close()
+  }
+}
+
+type Action = { action: "category"; category: string } | { action: "skip" } | { action: "quit" }
+
+/** Shows a numbered menu for a product and returns the chosen action. */
+const promptAction = async (
+  rl: readline.Interface,
+  sku: string,
+  title: string,
+): Promise<Action> => {
+  const prefix = `\n${sku} — ${title || "(no title)"}`
+
+  for (;;) {
+    const answer = (
+      await rl.question(`${prefix}\n  1) Choose category\n  2) Skip\n  3) Quit\nSelect 1-3: `)
+    ).trim()
+
+    if (answer === "1") {
+      const category = (await rl.question("Enter category: ")).trim()
+
+      if (category.length === 0) {
+        console.log("Empty category entered; please choose again.")
+        continue
+      }
+
+      return { action: "category", category }
+    }
+
+    if (answer === "2") {
+      return { action: "skip" }
+    }
+
+    if (answer === "3") {
+      return { action: "quit" }
+    }
+
+    console.log("Invalid selection; enter 1, 2, or 3.")
   }
 }
 
