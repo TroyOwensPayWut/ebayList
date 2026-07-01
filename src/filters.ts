@@ -2,7 +2,7 @@ import type { Frame, Page } from "playwright"
 
 // The Codisto eBay bulk grid filters each column via a popover opened from a search
 // glyph on the column header. Every run applies the SAME three filters:
-//   - Image           → keep only "No images"
+//   - Image           → keep only "Has images"
 //   - Quantity result → keep only positive quantities (>= 1); drop Not set / 0 / negatives
 //   - Payment policy  → keep only "Not set"
 export type ApplyFiltersResult = { ok: true } | { ok: false; error: string }
@@ -22,7 +22,7 @@ export const applyStandardFilters = async (page: Page): Promise<ApplyFiltersResu
     const frame = await getListingsFrame(page)
     await clearExistingFilters(frame)
 
-    await setColumnFilter(frame, IMAGE_COLUMN, { mode: "only", label: "No images" })
+    await setColumnFilter(frame, IMAGE_COLUMN, { mode: "only", label: "Has images" })
     await setColumnFilter(frame, QUANTITY_COLUMN, { mode: "positiveInt" })
     await setColumnFilter(frame, PAYMENT_POLICY_COLUMN, { mode: "only", label: "Not set" })
 
