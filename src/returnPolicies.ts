@@ -1,5 +1,7 @@
 import type { Frame, Page } from "playwright"
 
+import { waitForFrameLoaders } from "./pageLoad.js"
+
 const DEFAULT_POLICY_NAME = "free 30 days (252126089026)"
 
 export type ApplyReturnPolicyResult =
@@ -17,7 +19,7 @@ export const applyReturnPolicyToAllProducts = async (
   page: Page,
   policyName = DEFAULT_POLICY_NAME,
 ): Promise<ApplyReturnPolicyResult> => {
-  const normalizedPolicyName = normalizePolicyName(policyName)
+  const normalizedPolicyName = policyName.trim().replace(/\s+/g, " ")
 
   if (!normalizedPolicyName) {
     return { ok: false, policyName, error: "Policy name is required" }
@@ -40,7 +42,7 @@ export const applyReturnPolicyToAllProducts = async (
 const getListingsFrame = async (page: Page) => {
   await page.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
 
-  const frame = page.frames().find((candidate) => candidate.url().includes("shopui.codisto.com"))
+  const frame = page.frames().find((candidate) => candidate.url().includes("codisto"))
 
   if (!frame) {
     throw new Error("Marketplace Connect frame was not found")
@@ -49,65 +51,66 @@ const getListingsFrame = async (page: Page) => {
   return frame
 }
 
+// The header select-all checkbox has a styled <span class="checkbox-backdrop"> overlaying
+// the real <input>, so a Playwright click is intercepted ("checkbox-backdrop intercepts
+// pointer events"). Toggle it natively in-page instead — the same trick filters.ts uses.
 const selectAllProducts = async (frame: Frame) => {
-  await frame.getByPlaceholder("Search items", { exact: true }).waitFor({ state: "visible", timeout: 30000 })
+  await frame.locator("input[type='checkbox'].select-all").first().waitFor({ state: "attached", timeout: 30000 })
 
-  const bulkEdit = frame.getByRole("button", { name: "Bulk edit", exact: true }).first()
+  const checked = await frame.evaluate(() => {
+    const cb =
+      document.querySelector<HTMLInputElement>("input[type='checkbox'].select-all") ??
+      document.querySelector<HTMLInputElement>("input[type='checkbox']")
+    if (!cb) return false
+    if (!cb.checked) cb.click()
+    return cb.checked
+  })
 
-  if (await bulkEdit.isVisible().catch(() => false)) {
-    await bulkEdit.click()
+  if (!checked) {
+    throw new Error("Could not select all products (select-all checkbox not found or stayed unchecked)")
   }
 
-  const selectAll = frame.locator("input[type='checkbox']").first()
-
-  await selectAll.click()
-
-  const selectEveryProduct = frame.getByText(/selected - edit this row to update selected products/i).first()
-
-  if (!(await selectEveryProduct.isVisible().catch(() => false))) {
-    throw new Error("All products were not selected")
+  // The grid confirms selection with an "N selected - edit this row..." bulk-pane banner.
+  const banner = frame.getByText(/\bselected\s*-\s*edit this row to update selected products/i).first()
+  if (!(await banner.isVisible().catch(() => false))) {
+    throw new Error("All products were not selected (bulk-edit banner did not appear)")
   }
 }
 
+// The bulk-edit row's return-policy <select id="returnpolicyid"> is React-controlled, so a
+// raw dispatchEvent won't register — Playwright's selectOption fires the real events. Once a
+// value is chosen, a primary "Update" button appears; clicking it applies the policy to every
+// selected product.
 const chooseBulkReturnPolicy = async (frame: Frame, policyName: string) => {
-  const returnPolicySelect = frame
-    .locator("select")
-    .filter({ has: frame.locator("option", { hasText: exactPolicyPattern(policyName) }) })
-    .first()
+  const select = frame.locator("select#returnpolicyid").first()
 
-  if (!(await returnPolicySelect.isVisible().catch(() => false))) {
-    const availablePolicies = await getAvailableReturnPolicies(frame)
-    throw new Error(`Return policy '${policyName}' was not found. Available return policies: ${availablePolicies.join(", ")}`)
+  if ((await select.count()) === 0) {
+    throw new Error("Return policy selector was not found on the bulk-edit row")
   }
 
-  await returnPolicySelect.selectOption({ label: policyName })
-
-  const save = frame.getByRole("button", { name: /save|apply|update/i }).first()
-
-  if (await save.isVisible().catch(() => false)) {
-    await save.click()
+  try {
+    await select.selectOption({ label: policyName })
+  } catch {
+    const available = (await select.locator("option").allTextContents()).map((text) => text.trim()).filter(Boolean)
+    throw new Error(`Return policy '${policyName}' was not found. Available return policies: ${available.join(", ")}`)
   }
+
+  // The "Update" button (button.update-bulk-edit) is likewise overlaid by a
+  // <span class="bulk-active-text"> that intercepts Playwright clicks — click it natively.
+  await frame.locator("button.update-bulk-edit").first().waitFor({ state: "attached", timeout: 15000 })
+
+  const clicked = await frame.evaluate(() => {
+    const btn = [...document.querySelectorAll<HTMLButtonElement>("button.update-bulk-edit")].find(
+      (b) => (b as HTMLElement).offsetParent !== null,
+    )
+    if (!btn) return false
+    btn.click()
+    return true
+  })
+
+  if (!clicked) {
+    throw new Error("Bulk-edit Update button was not found after choosing the return policy")
+  }
+
+  await waitForFrameLoaders(frame)
 }
-
-const getAvailableReturnPolicies = async (frame: Frame) => {
-  const selectTexts = await frame.locator("select").allTextContents()
-  const policyOptions = new Set<string>()
-
-  for (const text of selectTexts) {
-    if (!/return|buyer|money back|free 30 days|no return/i.test(text)) {
-      continue
-    }
-
-    for (const policy of text.split(/\s{2,}|\n/).map(normalizePolicyName).filter(Boolean)) {
-      policyOptions.add(policy)
-    }
-  }
-
-  return [...policyOptions]
-}
-
-const normalizePolicyName = (name: string) => name.trim().replace(/\s+/g, " ")
-
-const exactPolicyPattern = (policyName: string) => new RegExp(`^${escapeRegex(normalizePolicyName(policyName))}$`, "i")
-
-const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
