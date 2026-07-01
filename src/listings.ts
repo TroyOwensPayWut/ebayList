@@ -13,8 +13,12 @@ export type EnableEbayProductResult =
       error: string
     }
 
+// The Codisto grid is a flat set of `.cell[data-row][data-column-class]` divs (no
+// tr/[role=row]). The `status` column is a segmented Enabled/Disabled Polaris button
+// pair; the `.Polaris-Button--pressed` one is the current state. Enabling = clicking
+// the "Enabled" button and waiting for it to become pressed.
 export const enableEbayProduct = async (page: Page, sku: string): Promise<EnableEbayProductResult> => {
-  const normalizedSku = normalizeSku(sku)
+  const normalizedSku = sku.trim()
 
   if (!normalizedSku) {
     return { ok: false, sku, error: "SKU is required" }
@@ -22,31 +26,43 @@ export const enableEbayProduct = async (page: Page, sku: string): Promise<Enable
 
   try {
     const frame = await getListingsFrame(page)
-    const rows = await findListingRows(frame, normalizedSku)
 
-    if (rows.length === 0) {
+    const search = frame.getByPlaceholder("Search items", { exact: true })
+    await search.waitFor({ state: "visible", timeout: 30000 })
+    await search.fill(normalizedSku)
+    await search.press("Enter")
+    await waitForFrameLoaders(frame)
+
+    const located = await waitForRow(frame, normalizedSku)
+
+    if (located.count === 0) {
       return { ok: false, sku: normalizedSku, error: `No listing found for SKU '${normalizedSku}'` }
     }
 
-    if (rows.length > 1) {
-      return { ok: false, sku: normalizedSku, error: `Found ${rows.length} listings for SKU '${normalizedSku}'` }
+    if (located.count > 1) {
+      return { ok: false, sku: normalizedSku, error: `Found ${located.count} listings for SKU '${normalizedSku}'` }
     }
 
-    const row = rows[0]
+    const statusCell = frame.locator(`.cell[data-row='${located.rowIndex}'][data-column-class='status']`)
+    const enabledButton = statusCell.getByRole("button", { name: "Enabled", exact: true })
 
-    if (await isEnabled(row)) {
+    if ((await enabledButton.count()) === 0) {
+      return { ok: false, sku: normalizedSku, error: `Enabled button was not found for SKU '${normalizedSku}'` }
+    }
+
+    if (await isPressed(enabledButton)) {
       return { ok: true, sku: normalizedSku }
     }
 
-    const toggle = await getEnableToggle(row)
+    await enabledButton.click()
 
-    if (!toggle) {
-      return { ok: false, sku: normalizedSku, error: `Enable toggle was not found for SKU '${normalizedSku}'` }
-    }
+    // The toggle only STAGES the change — Shopify shows a contextual Save/Discard
+    // bar on the host page (outside the iframe). Without clicking Save, a reload
+    // reverts the listing to Disabled.
+    await saveViaHostBar(page)
+    await waitForFrameLoaders(frame)
 
-    await toggle.click()
-
-    const enabled = await waitUntilEnabled(row)
+    const enabled = await waitUntilPressed(enabledButton)
     return enabled
       ? { ok: true, sku: normalizedSku }
       : { ok: false, sku: normalizedSku, error: `Listing did not become enabled for SKU '${normalizedSku}'` }
@@ -67,72 +83,53 @@ const getListingsFrame = async (page: Page) => {
   return frame
 }
 
-const findListingRows = async (frame: Frame, sku: string) => {
-  const search = frame.getByPlaceholder("Search items", { exact: true })
-  await search.waitFor({ state: "visible", timeout: 30000 })
-  await search.fill(sku)
-  await search.press("Enter")
-  await waitForFrameLoaders(frame)
+// The grid re-renders asynchronously after a search, so poll until the searched SKU
+// shows up in the `code` column (or the timeout elapses with whatever is there).
+const waitForRow = async (frame: Frame, sku: string) => {
+  const deadline = Date.now() + 15000
+  let located = await locateRow(frame, sku)
 
-  const skuPattern = exactTextPattern(sku)
-  const candidates = frame.locator("tr, [role='row']").filter({ hasText: skuPattern })
-  const rows: Locator[] = []
-
-  for (let index = 0, count = await candidates.count(); index < count; index += 1) {
-    const row = candidates.nth(index)
-
-    if (await row.isVisible().catch(() => false)) {
-      rows.push(row)
-    }
+  while (located.count === 0 && Date.now() < deadline) {
+    await frame.page().waitForTimeout(500)
+    located = await locateRow(frame, sku)
   }
 
-  return rows
+  return located
 }
 
-const isEnabled = async (row: Locator) => {
-  const enabledLabel = row.getByText(/enabled|listed|active/i).first()
+const locateRow = async (frame: Frame, sku: string) => {
+  return frame.evaluate((targetSku) => {
+    const matches = Array.from(document.querySelectorAll<HTMLElement>(".cell[data-column-class='code'][data-row]")).filter(
+      (cell) => (cell.textContent ?? "").trim().toLowerCase() === targetSku.toLowerCase(),
+    )
 
-  if (await enabledLabel.isVisible().catch(() => false)) {
-    return true
-  }
-
-  const checkedToggle = row.locator("input[type='checkbox']:checked, [role='switch'][aria-checked='true']").first()
-  return checkedToggle.isVisible().catch(() => false)
+    return { count: matches.length, rowIndex: matches[0]?.getAttribute("data-row") ?? "" }
+  }, sku)
 }
 
-const getEnableToggle = async (row: Locator) => {
-  const candidates = [
-    row.getByRole("switch").first(),
-    row.getByRole("checkbox").first(),
-    row.getByRole("button", { name: /enable|list|publish/i }).first(),
-    row.locator("input[type='checkbox']").first(),
-  ]
+const saveViaHostBar = async (page: Page) => {
+  const save = page.getByRole("button", { name: "Save", exact: true }).first()
 
-  for (const candidate of candidates) {
-    if ((await candidate.count()) > 0 && (await candidate.isVisible().catch(() => false))) {
-      return candidate
-    }
-  }
-
-  return null
+  await save.waitFor({ state: "visible", timeout: 10000 })
+  await save.click()
+  await save.waitFor({ state: "hidden", timeout: 30000 })
 }
 
-const waitUntilEnabled = async (row: Locator) => {
-  const startedAt = Date.now()
+const isPressed = async (button: Locator) => {
+  const className = await button.getAttribute("class")
+  return (className ?? "").includes("Polaris-Button--pressed")
+}
 
-  while (Date.now() - startedAt < 10000) {
-    if (await isEnabled(row)) {
+const waitUntilPressed = async (button: Locator) => {
+  const deadline = Date.now() + 15000
+
+  while (Date.now() < deadline) {
+    if (await isPressed(button)) {
       return true
     }
 
-    await row.page().waitForTimeout(500)
+    await button.page().waitForTimeout(500)
   }
 
   return false
 }
-
-const normalizeSku = (sku: string) => sku.trim()
-
-const exactTextPattern = (value: string) => new RegExp(`(^|\\s)${escapeRegex(value)}(\\s|$)`, "i")
-
-const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
