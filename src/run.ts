@@ -10,6 +10,7 @@ import { setEbayCategory } from "./categories.js"
 import { applyReturnPolicyToAllProducts } from "./returnPolicies.js"
 import { findNextAvailableEbaySku } from "./nextAvailableProduct.js"
 import { launchAuthenticated } from "./shopify.js"
+import { waitForFrameSettled } from "./pageLoad.js"
 import type { AppConfig } from "./types.js"
 
 export const runListingLoop = async (config: AppConfig) => {
@@ -28,6 +29,7 @@ export const runListingLoop = async (config: AppConfig) => {
     const googlePage = await context.newPage() // reused each loop for the category lookup
 
     console.log(`Activating filters: ${DEFAULT_FILTERS.join(", ")}...`)
+    await waitForFrameSettled(searchPage)
     const filters = await activateFilters(searchPage, DEFAULT_FILTERS)
     if (!filters.ok) {
       throw new Error(`${filters.error}. Available filters: ${filters.availableFilters.join(", ")}`)
@@ -35,6 +37,7 @@ export const runListingLoop = async (config: AppConfig) => {
     console.log(`Filters active: ${filters.activated.join(", ")}.`)
 
     console.log("Applying return policy to all products...")
+    await waitForFrameSettled(searchPage)
     const policy = await applyReturnPolicyToAllProducts(searchPage)
     if (!policy.ok) {
       throw new Error(policy.error)
@@ -46,6 +49,7 @@ export const runListingLoop = async (config: AppConfig) => {
 
     for (;;) {
       console.log(`\nScanning for next available product${lastSku ? ` after ${lastSku}` : ""}...`)
+      await waitForFrameSettled(searchPage)
       const next = await findNextAvailableEbaySku(searchPage, lastSku)
       if (!next.ok) {
         console.log(next.error)
@@ -70,6 +74,7 @@ export const runListingLoop = async (config: AppConfig) => {
       }
 
       console.log(`Setting category "${answer}" for ${sku}...`)
+      await waitForFrameSettled(editPage)
       const category = await setEbayCategory(editPage, sku, answer)
       if (!category.ok) {
         console.error(`Category failed for ${sku}: ${category.error}`)
@@ -78,6 +83,7 @@ export const runListingLoop = async (config: AppConfig) => {
       }
 
       console.log(`Category set. Enabling ${sku} on eBay...`)
+      await waitForFrameSettled(editPage)
       const enabled = await enableEbayProduct(editPage, sku)
       if (enabled.ok) {
         listedCount += 1

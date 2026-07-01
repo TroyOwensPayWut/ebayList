@@ -1,5 +1,7 @@
 import type { Frame, Locator, Page } from "playwright"
 
+import { waitForFrameLoaders } from "./pageLoad.js"
+
 export type EnableEbayProductResult =
   | {
       ok: true
@@ -70,7 +72,7 @@ const findListingRows = async (frame: Frame, sku: string) => {
   await search.waitFor({ state: "visible", timeout: 30000 })
   await search.fill(sku)
   await search.press("Enter")
-  await waitForSearchToSettle(frame)
+  await waitForFrameLoaders(frame)
 
   const skuPattern = exactTextPattern(sku)
   const candidates = frame.locator("tr, [role='row']").filter({ hasText: skuPattern })
@@ -127,10 +129,6 @@ const waitUntilEnabled = async (row: Locator) => {
   }
 
   return false
-}
-
-const waitForSearchToSettle = async (frame: Frame) => {
-  await frame.page().waitForTimeout(750)
 }
 
 const normalizeSku = (sku: string) => sku.trim()
