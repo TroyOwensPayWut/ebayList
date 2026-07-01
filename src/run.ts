@@ -5,7 +5,7 @@ import type { BrowserContext, Page } from "playwright"
 
 import { applyStandardFilters } from "./filters.js"
 import { enableEbayProduct } from "./listings.js"
-import { setEbayCategory } from "./categories.js"
+import { isValidCategoryId, setEbayCategory } from "./categories.js"
 import { applyReturnPolicyToAllProducts } from "./returnPolicies.js"
 import { findNextAvailableEbaySku } from "./nextAvailableProduct.js"
 import { launchAuthenticated } from "./shopify.js"
@@ -73,7 +73,7 @@ export const runListingLoop = async (config: AppConfig) => {
       }
 
       const answer = choice.category
-      console.log(`Setting category "${answer}" for ${sku}...`)
+      console.log(`Setting category #${answer} for ${sku}...`)
       await waitForFrameSettled(editPage)
       const category = await setEbayCategory(editPage, sku, answer)
       if (!category.ok) {
@@ -87,7 +87,7 @@ export const runListingLoop = async (config: AppConfig) => {
       const enabled = await enableEbayProduct(editPage, sku)
       if (enabled.ok) {
         listedCount += 1
-        console.log(`Listed ${sku} under "${answer}". (${listedCount} listed this run)`)
+        console.log(`Listed ${sku} under category #${answer}. (${listedCount} listed this run)`)
       } else {
         console.error(`Enable failed for ${sku}: ${enabled.error}`)
       }
@@ -113,14 +113,14 @@ const promptAction = async (
 
   for (;;) {
     const answer = (
-      await rl.question(`${prefix}\n  1) Choose category\n  2) Skip\n  3) Quit\nSelect 1-3: `)
+      await rl.question(`${prefix}\n  1) Enter category number\n  2) Skip\n  3) Quit\nSelect 1-3: `)
     ).trim()
 
     if (answer === "1") {
-      const category = (await rl.question("Enter category: ")).trim()
+      const category = (await rl.question("Enter eBay category number: ")).trim()
 
-      if (category.length === 0) {
-        console.log("Empty category entered; please choose again.")
+      if (!isValidCategoryId(category)) {
+        console.log("Enter a positive eBay category number (digits only).")
         continue
       }
 
