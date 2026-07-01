@@ -3,8 +3,7 @@ import { stdin as input, stdout as output } from "node:process"
 
 import type { BrowserContext, Page } from "playwright"
 
-import { DEFAULT_FILTERS } from "./config.js"
-import { activateFilters } from "./filters.js"
+import { applyStandardFilters } from "./filters.js"
 import { enableEbayProduct } from "./listings.js"
 import { setEbayCategory } from "./categories.js"
 import { applyReturnPolicyToAllProducts } from "./returnPolicies.js"
@@ -28,13 +27,13 @@ export const runListingLoop = async (config: AppConfig) => {
     console.log("Edit tab ready.")
     const googlePage = await context.newPage() // reused each loop for the category lookup
 
-    console.log(`Activating filters: ${DEFAULT_FILTERS.join(", ")}...`)
+    console.log("Applying standard filters (No images, quantity >= 1, payment policy not set)...")
     await waitForFrameSettled(searchPage)
-    const filters = await activateFilters(searchPage, DEFAULT_FILTERS)
+    const filters = await applyStandardFilters(searchPage)
     if (!filters.ok) {
-      throw new Error(`${filters.error}. Available filters: ${filters.availableFilters.join(", ")}`)
+      throw new Error(filters.error)
     }
-    console.log(`Filters active: ${filters.activated.join(", ")}.`)
+    console.log("Filters applied.")
 
     console.log("Applying return policy to all products...")
     await waitForFrameSettled(searchPage)
