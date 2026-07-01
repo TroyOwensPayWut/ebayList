@@ -5,12 +5,14 @@ import type { Frame, Page } from "playwright"
 //   - Image           → keep only "Has images"
 //   - Quantity result → keep only positive quantities (>= 1); drop Not set / 0 / negatives
 //   - Payment policy  → keep only "Not set"
+//   - Shopify status  → keep only "Active" (drop Archived / Draft)
 export type ApplyFiltersResult = { ok: true } | { ok: false; error: string }
 
 // data-column values on the grid headers (stable ids, not display labels).
 const IMAGE_COLUMN = "image"
 const QUANTITY_COLUMN = "quantityresult"
 const PAYMENT_POLICY_COLUMN = "paymentpolicyid"
+const SHOPIFY_STATUS_COLUMN = "externalstatus"
 
 // How to pick which option checkboxes stay ticked. Serializable so it can cross into
 // the page context (a real function can't) — "only" keeps one exact label, "positiveInt"
@@ -25,6 +27,7 @@ export const applyStandardFilters = async (page: Page): Promise<ApplyFiltersResu
     await setColumnFilter(frame, IMAGE_COLUMN, { mode: "only", label: "Has images" })
     await setColumnFilter(frame, QUANTITY_COLUMN, { mode: "positiveInt" })
     await setColumnFilter(frame, PAYMENT_POLICY_COLUMN, { mode: "only", label: "Not set" })
+    await setColumnFilter(frame, SHOPIFY_STATUS_COLUMN, { mode: "only", label: "Active" })
 
     return { ok: true }
   } catch (error) {
