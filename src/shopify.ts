@@ -15,6 +15,7 @@ export const launchAuthenticated = async (config: AppConfig): Promise<BrowserCon
     headless: config.headless,
     slowMo: config.slowMoMs,
     viewport: { width: 1440, height: 960 },
+    chromiumSandbox: true,
     args: ["--disable-blink-features=AutomationControlled"],
   })
 
@@ -37,6 +38,7 @@ export const runAuthOnly = async (config: AppConfig) => {
     headless: false,
     slowMo: config.slowMoMs,
     viewport: { width: 1440, height: 960 },
+    chromiumSandbox: true,
     args: ["--disable-blink-features=AutomationControlled"],
   })
 
