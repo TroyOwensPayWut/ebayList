@@ -1,6 +1,6 @@
-import type { Frame, Locator, Page } from "playwright"
+import type { Frame, Page } from "playwright"
 
-import { waitForFrameLoaders } from "./pageLoad.js"
+import { findRowIndex, getListingsFrame, searchForSku, setAndCommit, waitForCommit } from "./categories.js"
 
 export type EnableEbayProductResult =
   | {
@@ -13,10 +13,13 @@ export type EnableEbayProductResult =
       error: string
     }
 
-// The Codisto grid is a flat set of `.cell[data-row][data-column-class]` divs (no
-// tr/[role=row]). The `status` column is a segmented Enabled/Disabled Polaris button
-// pair; the `.Polaris-Button--pressed` one is the current state. Enabling = clicking
-// the "Enabled" button and waiting for it to become pressed.
+// The grid's Enabled/Disabled segmented button is the `status` column in the Codisto
+// dataSet (-1 = enabled, 0 = disabled — Codisto uses -1 for true everywhere). Clicking
+// the button only STAGES the change; it isn't saved until the next dataSet.commit(),
+// which is why UI clicks appeared to enable the wrong product a step late. So we write
+// the data layer directly and commit, exactly like setEbayCategory does.
+const STATUS_ENABLED = -1
+
 export const enableEbayProduct = async (page: Page, sku: string): Promise<EnableEbayProductResult> => {
   const normalizedSku = sku.trim()
 
@@ -26,110 +29,51 @@ export const enableEbayProduct = async (page: Page, sku: string): Promise<Enable
 
   try {
     const frame = await getListingsFrame(page)
+    await searchForSku(frame, normalizedSku)
 
-    const search = frame.getByPlaceholder("Search items", { exact: true })
-    await search.waitFor({ state: "visible", timeout: 30000 })
-    await search.fill(normalizedSku)
-    await search.press("Enter")
-    await waitForFrameLoaders(frame)
-
-    const located = await waitForRow(frame, normalizedSku)
-
-    if (located.count === 0) {
+    const located = await findRowIndex(frame, normalizedSku)
+    if (located.status === "nogrid") {
+      return { ok: false, sku: normalizedSku, error: "Codisto grid was not found on the page" }
+    }
+    if (located.status === "notfound") {
       return { ok: false, sku: normalizedSku, error: `No listing found for SKU '${normalizedSku}'` }
     }
-
-    if (located.count > 1) {
+    if (located.status === "multiple") {
       return { ok: false, sku: normalizedSku, error: `Found ${located.count} listings for SKU '${normalizedSku}'` }
     }
 
-    const statusCell = frame.locator(`.cell[data-row='${located.rowIndex}'][data-column-class='status']`)
-    const enabledButton = statusCell.getByRole("button", { name: "Enabled", exact: true })
-
-    if ((await enabledButton.count()) === 0) {
-      return { ok: false, sku: normalizedSku, error: `Enabled button was not found for SKU '${normalizedSku}'` }
-    }
-
-    if (await isPressed(enabledButton)) {
+    if ((await readStatus(frame, located.index)) === STATUS_ENABLED) {
       return { ok: true, sku: normalizedSku }
     }
 
-    await enabledButton.click()
+    await setAndCommit(frame, located.index, "status", STATUS_ENABLED)
 
-    // The toggle only STAGES the change — Shopify shows a contextual Save/Discard
-    // bar on the host page (outside the iframe). Without clicking Save, a reload
-    // reverts the listing to Disabled.
-    await saveViaHostBar(page)
-    await waitForFrameLoaders(frame)
+    const settled = await waitForCommit(frame)
+    if (!settled.ok) {
+      return { ok: false, sku: normalizedSku, error: settled.error }
+    }
 
-    const enabled = await waitUntilPressed(enabledButton)
-    return enabled
+    const finalStatus = await readStatus(frame, located.index)
+    return finalStatus === STATUS_ENABLED
       ? { ok: true, sku: normalizedSku }
-      : { ok: false, sku: normalizedSku, error: `Listing did not become enabled for SKU '${normalizedSku}'` }
+      : { ok: false, sku: normalizedSku, error: `Listing did not become enabled for SKU '${normalizedSku}' (status=${finalStatus})` }
   } catch (error) {
     return { ok: false, sku: normalizedSku, error: error instanceof Error ? error.message : String(error) }
   }
 }
 
-const getListingsFrame = async (page: Page) => {
-  await page.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
-
-  const frame = page.frames().find((candidate) => candidate.url().includes("shopui.codisto.com"))
-
-  if (!frame) {
-    throw new Error("Marketplace Connect frame was not found")
-  }
-
-  return frame
-}
-
-// The grid re-renders asynchronously after a search, so poll until the searched SKU
-// shows up in the `code` column (or the timeout elapses with whatever is there).
-const waitForRow = async (frame: Frame, sku: string) => {
-  const deadline = Date.now() + 15000
-  let located = await locateRow(frame, sku)
-
-  while (located.count === 0 && Date.now() < deadline) {
-    await frame.page().waitForTimeout(500)
-    located = await locateRow(frame, sku)
-  }
-
-  return located
-}
-
-const locateRow = async (frame: Frame, sku: string) => {
-  return frame.evaluate((targetSku) => {
-    const matches = Array.from(document.querySelectorAll<HTMLElement>(".cell[data-column-class='code'][data-row]")).filter(
-      (cell) => (cell.textContent ?? "").trim().toLowerCase() === targetSku.toLowerCase(),
-    )
-
-    return { count: matches.length, rowIndex: matches[0]?.getAttribute("data-row") ?? "" }
-  }, sku)
-}
-
-const saveViaHostBar = async (page: Page) => {
-  const save = page.getByRole("button", { name: "Save", exact: true }).first()
-
-  await save.waitFor({ state: "visible", timeout: 10000 })
-  await save.click()
-  await save.waitFor({ state: "hidden", timeout: 30000 })
-}
-
-const isPressed = async (button: Locator) => {
-  const className = await button.getAttribute("class")
-  return (className ?? "").includes("Polaris-Button--pressed")
-}
-
-const waitUntilPressed = async (button: Locator) => {
-  const deadline = Date.now() + 15000
-
-  while (Date.now() < deadline) {
-    if (await isPressed(button)) {
-      return true
+const readStatus = async (frame: Frame, index: number) => {
+  return frame.evaluate((rowIndex) => {
+    const w = window as unknown as { $?: (s: unknown) => { data: (k: string) => unknown } }
+    const $ = w.$
+    const gridEl = document.getElementById("ebaytable")
+    if (!$ || !gridEl) throw new Error("Codisto grid disappeared")
+    const inst = $(gridEl).data("codisto.grid") as {
+      dataSet?: { data: Array<{ currentData?: Record<string, unknown>; baseData?: Record<string, unknown> }> }
     }
-
-    await button.page().waitForTimeout(500)
-  }
-
-  return false
+    const rec = inst?.dataSet?.data[rowIndex]
+    if (!rec) throw new Error("Codisto grid row disappeared")
+    const row = rec.currentData || rec.baseData || {}
+    return Number(row.status)
+  }, index)
 }

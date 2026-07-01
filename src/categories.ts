@@ -60,7 +60,7 @@ export const setEbayCategory = async (
       return fail(normalizedSku, normalizedCategoryId, `Found ${located.count} listings for SKU '${normalizedSku}'`)
     }
 
-    await setAndCommit(frame, located.index, Number(normalizedCategoryId))
+    await setAndCommit(frame, located.index, "primarycategoryid", Number(normalizedCategoryId))
 
     const settled = await waitForCommit(frame)
     if (!settled.ok) {
@@ -73,7 +73,7 @@ export const setEbayCategory = async (
   }
 }
 
-const getListingsFrame = async (page: Page): Promise<Frame> => {
+export const getListingsFrame = async (page: Page): Promise<Frame> => {
   await page.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
 
   // The iframe can attach before its URL resolves to the Codisto app — poll for it.
@@ -90,7 +90,7 @@ const getListingsFrame = async (page: Page): Promise<Frame> => {
 }
 
 // Filter the grid down to the SKU so its row is loaded into the (virtualized) dataSet.
-const searchForSku = async (frame: Frame, sku: string) => {
+export const searchForSku = async (frame: Frame, sku: string) => {
   const search = frame.getByPlaceholder("Search items", { exact: true })
   await search.waitFor({ state: "visible", timeout: 30000 })
   await search.fill(sku)
@@ -98,14 +98,14 @@ const searchForSku = async (frame: Frame, sku: string) => {
   await waitForFrameLoaders(frame)
 }
 
-type LocateResult =
+export type LocateResult =
   | { status: "ok"; index: number; key: number }
   | { status: "notfound" }
   | { status: "multiple"; count: number }
   | { status: "nogrid" }
 
 // Poll the grid's dataSet until the SKU's row is loaded (search results stream in).
-const findRowIndex = async (frame: Frame, sku: string): Promise<LocateResult> => {
+export const findRowIndex = async (frame: Frame, sku: string): Promise<LocateResult> => {
   const deadline = Date.now() + 15000
   let last: LocateResult = { status: "notfound" }
 
@@ -150,10 +150,10 @@ const findRowIndex = async (frame: Frame, sku: string): Promise<LocateResult> =>
   return last
 }
 
-// Stage the category id on the row and commit (POSTs savedata to Codisto).
-const setAndCommit = async (frame: Frame, index: number, categoryId: number) => {
+// Stage a column value on the row and commit (POSTs savedata to Codisto).
+export const setAndCommit = async (frame: Frame, index: number, column: string, value: unknown) => {
   await frame.evaluate(
-    ({ index, categoryId }) => {
+    ({ index, column, value }) => {
       const w = window as unknown as { $?: (s: unknown) => { data: (k: string) => unknown } }
       const $ = w.$
       const gridEl = document.getElementById("ebaytable")
@@ -163,15 +163,15 @@ const setAndCommit = async (frame: Frame, index: number, categoryId: number) => 
       }
       const ds = inst?.dataSet
       if (!ds) throw new Error("Codisto grid dataSet disappeared before commit")
-      ds.set(index, "primarycategoryid", categoryId)
+      ds.set(index, column, value)
       ds.commit()
     },
-    { index, categoryId },
+    { index, column, value },
   )
 }
 
-// commit() clears dataSet dirty on server "ok"/"warning"; a rejected category leaves it dirty.
-const waitForCommit = async (frame: Frame): Promise<{ ok: true } | { ok: false; error: string }> => {
+// commit() clears dataSet dirty on server "ok"/"warning"; a rejected change leaves it dirty.
+export const waitForCommit = async (frame: Frame): Promise<{ ok: true } | { ok: false; error: string }> => {
   const deadline = Date.now() + 30000
 
   while (Date.now() < deadline) {
