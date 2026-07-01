@@ -2,6 +2,7 @@ import type { Frame, Page } from "playwright"
 
 type ExtractedRow = {
   sku: string
+  title: string
   enabled: boolean | null
   hasError: boolean
   text: string
@@ -11,6 +12,7 @@ export type FindNextAvailableEbaySkuResult =
   | {
       ok: true
       sku: string
+      title: string
     }
   | {
       ok: false
@@ -21,7 +23,7 @@ export type FindNextAvailableEbaySkuResult =
 // given, only rows *after* the matching row are eligible (the start row itself is
 // skipped). Exported for the self-check in nextAvailableProduct.test.ts.
 export const pickNextAvailableSku = (
-  rows: Pick<ExtractedRow, "sku" | "enabled" | "hasError">[],
+  rows: Pick<ExtractedRow, "sku" | "title" | "enabled" | "hasError">[],
   startSku?: string,
 ): FindNextAvailableEbaySkuResult => {
   const target = startSku?.trim()
@@ -37,7 +39,7 @@ export const pickNextAvailableSku = (
     }
 
     if (row.enabled === false && !row.hasError) {
-      return { ok: true, sku: row.sku }
+      return { ok: true, sku: row.sku, title: row.title ?? "" }
     }
   }
 
@@ -175,6 +177,7 @@ const extractVisibleRows = async (frame: Frame) => {
       const enabled = getEnabledState(rowElements)
       rows.push({
         sku: skuElement.text,
+        title: getTitle(rowElements, skuElement.text),
         enabled,
         hasError: hasListingError(rowText),
         text: rowText,
@@ -182,6 +185,15 @@ const extractVisibleRows = async (frame: Frame) => {
     }
 
     return dedupeRows(rows)
+
+    // ponytail: longest-text heuristic for title; tune selector against real Codisto DOM if wrong
+    function getTitle(rowElements: VisibleElement[], sku: string) {
+      const status = /^(yes|no|enabled|disabled|listed|active|edit|error|warning)$/i
+      return rowElements
+        .map((element) => element.text)
+        .filter((text) => text && text !== sku && !status.test(text) && /[a-z]/.test(text))
+        .sort((left, right) => right.length - left.length)[0] ?? ""
+    }
 
     function getEnabledState(rowElements: VisibleElement[]) {
       if (rowElements.some((element) => element.ariaChecked === "true" || (element.type === "checkbox" && element.checked && /enable|enabled/i.test(element.label + element.title)))) {

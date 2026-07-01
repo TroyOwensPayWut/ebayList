@@ -1,5 +1,6 @@
 import { buildConfig, parseCliOptions } from "./config.js"
-import { checkAuth, runAuthOnly } from "./shopify.js"
+import { runListingLoop } from "./run.js"
+import { runAuthOnly } from "./shopify.js"
 
 const main = async () => {
   const config = buildConfig(parseCliOptions())
@@ -10,8 +11,7 @@ const main = async () => {
     return
   }
 
-  await checkAuth(config)
-  console.log("Shopify session is ready. eBay listing automation is not implemented yet.")
+  await runListingLoop(config)
 }
 
 main().catch((error: unknown) => {

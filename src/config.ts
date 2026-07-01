@@ -3,6 +3,8 @@ import process from "node:process"
 
 import type { AppConfig, CliOptions } from "./types.js"
 
+export const DEFAULT_FILTERS = ["Image is NOT 0", "Quantity result is filtered", "Payment policy is empty"]
+
 const SHOPIFY_STORE_DOMAIN = "paywut.myshopify.com"
 const SHOPIFY_LOGIN_TIMEOUT_MS = 180000
 const SHOPIFY_BROWSER_CHANNEL: "chrome" | "msedge" | undefined = undefined

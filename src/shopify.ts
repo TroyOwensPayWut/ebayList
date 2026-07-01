@@ -1,8 +1,33 @@
 import fs from "node:fs/promises"
 
-import { chromium, type Page } from "playwright"
+import { chromium, type BrowserContext, type Page } from "playwright"
 
 import type { AppConfig } from "./types.js"
+
+// Launch the persistent Chromium profile, ensure Shopify is logged in, and return
+// the OPEN context. Caller owns closing it (used by the listing loop, which keeps
+// the browser open across many tabs). checkAuth/runAuthOnly below close their own.
+export const launchAuthenticated = async (config: AppConfig): Promise<BrowserContext> => {
+  await fs.mkdir(config.profileDir, { recursive: true })
+
+  const context = await chromium.launchPersistentContext(config.profileDir, {
+    channel: config.browserChannel,
+    headless: config.headless,
+    slowMo: config.slowMoMs,
+    viewport: { width: 1440, height: 960 },
+    args: ["--disable-blink-features=AutomationControlled"],
+  })
+
+  try {
+    await context.addInitScript("window.__name = function(fn) { return fn; };")
+    const page = context.pages()[0] ?? (await context.newPage())
+    await ensureLoggedIn(page, config)
+    return context
+  } catch (error) {
+    await context.close()
+    throw error
+  }
+}
 
 export const runAuthOnly = async (config: AppConfig) => {
   await fs.mkdir(config.profileDir, { recursive: true })
@@ -19,26 +44,6 @@ export const runAuthOnly = async (config: AppConfig) => {
     await context.addInitScript("window.__name = function(fn) { return fn; };")
     const page = context.pages()[0] ?? (await context.newPage())
     await ensureLoggedIn(page, { ...config, headless: false })
-  } finally {
-    await context.close()
-  }
-}
-
-export const checkAuth = async (config: AppConfig) => {
-  await fs.mkdir(config.profileDir, { recursive: true })
-
-  const context = await chromium.launchPersistentContext(config.profileDir, {
-    channel: config.browserChannel,
-    headless: config.headless,
-    slowMo: config.slowMoMs,
-    viewport: { width: 1440, height: 960 },
-    args: ["--disable-blink-features=AutomationControlled"],
-  })
-
-  try {
-    await context.addInitScript("window.__name = function(fn) { return fn; };")
-    const page = context.pages()[0] ?? (await context.newPage())
-    await ensureLoggedIn(page, config)
   } finally {
     await context.close()
   }
