@@ -108,126 +108,51 @@ const getListingsFrame = async (page: Page) => {
   return frame
 }
 
-const extractVisibleRows = async (frame: Frame) => {
+// The Codisto grid is a flat set of `.cell.colN.rowM` divs, each carrying
+// data-row (viewport row index) and data-column-class (stable column id). We group
+// cells by data-row and read the columns we care about:
+//   code   -> SKU
+//   name   -> title
+//   status -> segmented Enabled/Disabled button group; the .Polaris-Button--pressed one is current
+// Errors surface as Polaris critical/warning/attention badges in a row.
+const extractVisibleRows = async (frame: Frame): Promise<ExtractedRow[]> => {
   return frame.evaluate(() => {
-    type VisibleElement = {
-      top: number
-      left: number
-      bottom: number
-      text: string
-      tag: string
-      type: string
-      checked: boolean
-      ariaChecked: string | null
-      title: string
-      label: string
-      className: string
-    }
-
     const normalize = (value: string | null | undefined) => (value ?? "").trim().replace(/\s+/g, " ")
-    const isVisible = (element: Element) => {
-      const style = window.getComputedStyle(element)
+    const rowMap = new Map<string, ExtractedRow>()
 
-      if (style.visibility === "hidden" || style.display === "none" || Number(style.opacity) === 0) {
-        return false
+    for (const cell of Array.from(document.querySelectorAll<HTMLElement>(".cell[data-row]"))) {
+      const rowIndex = cell.getAttribute("data-row")
+      if (rowIndex == null) continue
+
+      let row = rowMap.get(rowIndex)
+      if (!row) {
+        row = { sku: "", title: "", enabled: null, hasError: false, text: "" }
+        rowMap.set(rowIndex, row)
       }
 
-      const rect = element.getBoundingClientRect()
-      return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight
-    }
+      const colClass = cell.getAttribute("data-column-class") ?? ""
+      const text = normalize(cell.textContent)
+      row.text += ` ${text}`
 
-    const visibleElements: VisibleElement[] = Array.from(document.querySelectorAll("button,input,[role='button'],[role='switch'],[role='checkbox'],a,div,span,td"))
-      .filter(isVisible)
-      .map((element) => {
-        const rect = element.getBoundingClientRect()
-        const input = element instanceof HTMLInputElement ? element : null
-        const ownText = normalize(element.childElementCount === 0 ? element.textContent : element.textContent)
-        const label = normalize(element.getAttribute("aria-label"))
-        return {
-          top: rect.top,
-          left: rect.left,
-          bottom: rect.bottom,
-          text: ownText || label || normalize(input?.value),
-          tag: element.tagName.toLowerCase(),
-          type: normalize(input?.type),
-          checked: Boolean(input?.checked),
-          ariaChecked: element.getAttribute("aria-checked"),
-          title: normalize(element.getAttribute("title")),
-          label,
-          className: normalize(element.getAttribute("class")),
-        }
-      })
-      .filter((element) => element.text || element.type === "checkbox" || element.ariaChecked !== null)
-
-    const header = visibleElements.find((element) => /^Code$/i.test(element.text))
-    const minTop = header ? header.bottom : 0
-    const skuElements = visibleElements
-      .filter((element) => element.top > minTop && /^[A-Z]{2,}\d+[A-Z0-9-]*$/i.test(element.text))
-      .sort((left, right) => left.top - right.top || left.left - right.left)
-
-    const rows: ExtractedRow[] = []
-
-    for (const skuElement of skuElements) {
-      const rowElements = visibleElements.filter((element) => Math.abs(element.top - skuElement.top) < 12 || Math.abs(element.bottom - skuElement.bottom) < 12)
-      const rowText = rowElements
-        .sort((left, right) => left.left - right.left)
-        .map((element) => [element.text, element.label, element.title, element.className].filter(Boolean).join(" "))
-        .join(" ")
-
-      const enabled = getEnabledState(rowElements)
-      rows.push({
-        sku: skuElement.text,
-        title: getTitle(rowElements, skuElement.text),
-        enabled,
-        hasError: hasListingError(rowText),
-        text: rowText,
-      })
-    }
-
-    return dedupeRows(rows)
-
-    // ponytail: longest-text heuristic for title; tune selector against real Codisto DOM if wrong
-    function getTitle(rowElements: VisibleElement[], sku: string) {
-      const status = /^(yes|no|enabled|disabled|listed|active|edit|error|warning)$/i
-      return rowElements
-        .map((element) => element.text)
-        .filter((text) => text && text !== sku && !status.test(text) && /[a-z]/.test(text))
-        .sort((left, right) => right.length - left.length)[0] ?? ""
-    }
-
-    function getEnabledState(rowElements: VisibleElement[]) {
-      if (rowElements.some((element) => element.ariaChecked === "true" || (element.type === "checkbox" && element.checked && /enable|enabled/i.test(element.label + element.title)))) {
-        return true
+      if (colClass === "code") {
+        row.sku = text
+      } else if (colClass === "name") {
+        row.title = text
+      } else if (colClass === "status") {
+        const pressed = cell.querySelector(".Polaris-Button--pressed .Polaris-Button__Text")
+        if (pressed) row.enabled = /^enabled$/i.test(normalize(pressed.textContent))
       }
 
-      const statusButtons = rowElements.filter((element) => /^(Yes|No)$/i.test(element.text))
-
-      if (statusButtons.some((element) => /^No$/i.test(element.text))) {
-        return false
+      // A critical/warning/attention Polaris badge in the row marks a listing error.
+      if (Array.from(cell.querySelectorAll<HTMLElement>("[class*='Badge']")).some((b) => /critical|warning|attention/i.test(b.className))) {
+        row.hasError = true
       }
-
-      if (statusButtons.some((element) => /^Yes$/i.test(element.text))) {
-        return true
-      }
-
-      return null
     }
 
-    function hasListingError(text: string) {
-      return /\b(error|failed|invalid|missing|required|problem|warning|attention|fix|rejected)\b/i.test(text)
-    }
-
-    function dedupeRows(rows: ExtractedRow[]) {
-      const seen = new Set<string>()
-      return rows.filter((row) => {
-        if (seen.has(row.sku)) {
-          return false
-        }
-
-        seen.add(row.sku)
-        return true
-      })
-    }
+    return Array.from(rowMap.entries())
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([, row]) => row)
+      .filter((row) => /^[A-Z]{2,}\d/i.test(row.sku))
   })
 }
 
