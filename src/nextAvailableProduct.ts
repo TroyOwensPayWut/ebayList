@@ -17,32 +17,71 @@ export type FindNextAvailableEbaySkuResult =
       error: string
     }
 
-export const findNextAvailableEbaySku = async (page: Page): Promise<FindNextAvailableEbaySkuResult> => {
+// Pure gating logic over the ordered list of rows seen so far. When startSku is
+// given, only rows *after* the matching row are eligible (the start row itself is
+// skipped). Exported for the self-check in nextAvailableProduct.test.ts.
+export const pickNextAvailableSku = (
+  rows: Pick<ExtractedRow, "sku" | "enabled" | "hasError">[],
+  startSku?: string,
+): FindNextAvailableEbaySkuResult => {
+  const target = startSku?.trim()
+  const targetLower = target?.toLowerCase()
+  let startFound = !target
+
+  for (const row of rows) {
+    if (!startFound) {
+      if (row.sku.toLowerCase() === targetLower) {
+        startFound = true
+      }
+      continue
+    }
+
+    if (row.enabled === false && !row.hasError) {
+      return { ok: true, sku: row.sku }
+    }
+  }
+
+  if (rows.length === 0) {
+    return { ok: false, error: "No product rows were found" }
+  }
+
+  if (target && !startFound) {
+    return { ok: false, error: `Start SKU ${target} was not found` }
+  }
+
+  return { ok: false, error: "No disabled product without errors was found" }
+}
+
+export const findNextAvailableEbaySku = async (page: Page, startSku?: string): Promise<FindNextAvailableEbaySkuResult> => {
   try {
     const frame = await getListingsFrame(page)
     await frame.getByPlaceholder("Search items", { exact: true }).waitFor({ state: "visible", timeout: 30000 })
 
     const seenSkus = new Set<string>()
+    const allRows: ExtractedRow[] = []
     let previousLastSku = ""
 
     for (let pass = 0; pass < 500; pass += 1) {
       const rows = await extractVisibleRows(frame)
 
       for (const row of rows) {
-        seenSkus.add(row.sku)
-
-        if (row.enabled === false && !row.hasError) {
-          return { ok: true, sku: row.sku }
+        if (!seenSkus.has(row.sku)) {
+          seenSkus.add(row.sku)
+          allRows.push(row)
         }
+      }
+
+      const result = pickNextAvailableSku(allRows, startSku)
+
+      if (result.ok) {
+        return result
       }
 
       const lastSku = rows.at(-1)?.sku ?? ""
 
+      // Grid can no longer scroll — the accumulated result (error) is final.
       if (!lastSku || lastSku === previousLastSku) {
-        return {
-          ok: false,
-          error: seenSkus.size === 0 ? "No product rows were found" : "No disabled product without errors was found",
-        }
+        return result
       }
 
       previousLastSku = lastSku
