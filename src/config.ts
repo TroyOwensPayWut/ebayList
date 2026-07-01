@@ -7,7 +7,7 @@ export const DEFAULT_FILTERS = ["Image is NOT 0", "Quantity result is filtered",
 
 const SHOPIFY_STORE_DOMAIN = "paywut.myshopify.com"
 const SHOPIFY_LOGIN_TIMEOUT_MS = 180000
-const SHOPIFY_BROWSER_CHANNEL: "chrome" | "msedge" | undefined = undefined
+const SHOPIFY_BROWSER_CHANNEL: "chrome" | "msedge" | undefined = "chrome"
 
 export const parseCliOptions = () => {
   const args = process.argv.slice(2)
@@ -51,6 +51,8 @@ export const parseCliOptions = () => {
 export const buildConfig = (cliOptions: CliOptions) => {
   const profileDir = path.resolve(process.cwd(), ".auth", "profile")
   const productsUrl = `https://${SHOPIFY_STORE_DOMAIN}/admin/products`
+  // Marketplace Connect eBay bulk grid — this is where the shopui.codisto.com iframe lives.
+  const listingsUrl = "https://admin.shopify.com/store/paywut/apps/shopify-marketplace-connect/211238/ebay/bulk"
 
   return {
     ...cliOptions,
@@ -58,6 +60,7 @@ export const buildConfig = (cliOptions: CliOptions) => {
     loginTimeoutMs: SHOPIFY_LOGIN_TIMEOUT_MS,
     profileDir,
     productsUrl,
+    listingsUrl,
     browserChannel: SHOPIFY_BROWSER_CHANNEL,
   } satisfies AppConfig
 }

@@ -9,5 +9,6 @@ export type AppConfig = CliOptions & {
   loginTimeoutMs: number
   profileDir: string
   productsUrl: string
+  listingsUrl: string
   browserChannel: "chrome" | "msedge" | undefined
 }
