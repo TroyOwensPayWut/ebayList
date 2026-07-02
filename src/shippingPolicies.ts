@@ -1,3 +1,7 @@
+import type { Frame, Page } from "playwright"
+
+import { getListingsFrame, saveRowValue } from "./grid.js"
+
 // Weight-tiered eBay shipping policies, exactly as named in the policy dropdown.
 // Sorted by upper bound; first tier whose max the weight fits under wins
 // (upper-inclusive, so 3 lb → "W1-3"). Tiers with a gap above them (0.99→1,
@@ -28,4 +32,54 @@ export const shippingPolicyForWeightLb = (weightLb: number): string | null => {
   }
 
   return TIERS.find((tier) => weightLb <= tier.maxLb)?.policyName ?? null
+}
+
+// Policy IDs are resolved live from the grid's select#shippingpolicyid by label
+// (instead of hardcoding 15 IDs) so re-created policies keep working.
+export const resolveShippingPolicyId = async (frame: Frame, policyName: string): Promise<string | null> =>
+  frame.evaluate((wanted) => {
+    const select = document.querySelector<HTMLSelectElement>("select#shippingpolicyid")
+    if (!select) return null
+    for (const option of Array.from(select.options)) {
+      if (option.label.trim() === wanted) return option.value
+    }
+    return null
+  }, policyName)
+
+export type SetShippingPolicyResult =
+  | { ok: true; sku: string; weightLb: number; policyName: string; policyId: string }
+  | { ok: false; sku: string; error: string }
+
+/** Picks the weight tier for weightLb and saves it as the SKU's eBay shipping policy. */
+export const setShippingPolicyByWeight = async (
+  page: Page,
+  sku: string,
+  weightLb: number,
+  options: { commit?: boolean } = {},
+): Promise<SetShippingPolicyResult> => {
+  const normalizedSku = sku.trim()
+
+  if (!normalizedSku) {
+    return { ok: false, sku, error: "SKU is required" }
+  }
+
+  const policyName = shippingPolicyForWeightLb(weightLb)
+  if (!policyName) {
+    return { ok: false, sku: normalizedSku, error: `No shipping policy tier for weight ${weightLb} lb` }
+  }
+
+  try {
+    const frame = await getListingsFrame(page)
+    const policyId = await resolveShippingPolicyId(frame, policyName)
+    if (!policyId) {
+      return { ok: false, sku: normalizedSku, error: `Policy "${policyName}" not found in the grid's shipping policy list` }
+    }
+
+    const saved = await saveRowValue(page, normalizedSku, "shippingpolicyid", policyId, options)
+    return saved.ok
+      ? { ok: true, sku: normalizedSku, weightLb, policyName, policyId }
+      : { ok: false, sku: normalizedSku, error: saved.error }
+  } catch (error) {
+    return { ok: false, sku: normalizedSku, error: error instanceof Error ? error.message : String(error) }
+  }
 }
