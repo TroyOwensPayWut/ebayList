@@ -1,6 +1,6 @@
 import type { Frame, Page } from "playwright"
 
-import { waitForFrameLoaders } from "./pageLoad.js"
+import { findCodistoFrame, waitForFrameLoaders } from "./pageLoad.js"
 
 // Shared plumbing for the Codisto bulk grid (id="ebaytable") — a virtualized
 // datagrid inside the shopui.codisto.com iframe. Saving works like the app's own
@@ -9,21 +9,7 @@ import { waitForFrameLoaders } from "./pageLoad.js"
 // (they ride along with the next commit), so writers here go straight to the data
 // layer instead.
 
-export const getListingsFrame = async (page: Page): Promise<Frame> => {
-  await page.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
-
-  // The iframe can attach before its URL resolves to the Codisto app — poll for it.
-  const deadline = Date.now() + 30000
-  while (Date.now() < deadline) {
-    const frame = page.frames().find((candidate) => candidate.url().includes("shopui.codisto.com"))
-    if (frame) {
-      return frame
-    }
-    await page.waitForTimeout(500)
-  }
-
-  throw new Error("Marketplace Connect frame was not found")
-}
+export const getListingsFrame = (page: Page): Promise<Frame> => findCodistoFrame(page, 30000)
 
 // Filter the grid down to the SKU so its row is loaded into the (virtualized) dataSet.
 export const searchForSku = async (frame: Frame, sku: string) => {

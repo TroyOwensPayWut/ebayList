@@ -1,5 +1,7 @@
 import type { Frame, Page } from "playwright"
 
+import { findCodistoFrame } from "./pageLoad.js"
+
 // The Codisto eBay bulk grid filters each column via a popover opened from a search
 // glyph on the column header. Every run applies the SAME three filters:
 //   - Image           → keep only "Has images"
@@ -35,14 +37,7 @@ export const applyStandardFilters = async (page: Page): Promise<ApplyFiltersResu
   }
 }
 
-const getListingsFrame = async (page: Page) => {
-  await page.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
-  const frame = page.frames().find((candidate) => candidate.url().includes("codisto"))
-  if (!frame) {
-    throw new Error("Marketplace Connect frame was not found")
-  }
-  return frame
-}
+const getListingsFrame = findCodistoFrame
 
 // Reset to a clean slate so re-running doesn't stack onto leftover filters.
 // The active-filter bar shows a "Clear all" control only when filters exist.

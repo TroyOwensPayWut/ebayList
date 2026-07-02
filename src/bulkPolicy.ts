@@ -1,6 +1,6 @@
 import type { Frame, Page } from "playwright"
 
-import { waitForFrameLoaders } from "./pageLoad.js"
+import { findCodistoFrame, waitForFrameLoaders } from "./pageLoad.js"
 
 // Shared bulk-edit-row policy applier for the Codisto grid: select all products,
 // pick a policy in the bulk-edit <select>, click Update.
@@ -48,17 +48,7 @@ export const applyBulkPolicyToAllProducts = async (
   }
 }
 
-const getListingsFrame = async (page: Page) => {
-  await page.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
-
-  const frame = page.frames().find((candidate) => candidate.url().includes("codisto"))
-
-  if (!frame) {
-    throw new Error("Marketplace Connect frame was not found")
-  }
-
-  return frame
-}
+const getListingsFrame = findCodistoFrame
 
 // The header select-all <input> is disabled until a row is selected, so DOM clicks are a
 // dead end. The grid instance ($(#ebaytable).data("codisto.grid")) exposes a real selection

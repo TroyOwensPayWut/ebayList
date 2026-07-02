@@ -48,14 +48,26 @@ export const waitForFrameLoaders = async (frame: Frame, options: SettleOptions =
   await waitUntilIdle(isLoading, options)
 }
 
+// The iframe can attach before its URL resolves to the Codisto app — poll for it
+// instead of failing on the first look.
+export const findCodistoFrame = async (page: Page, timeoutMs = 10000): Promise<Frame> => {
+  await page.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
+  const deadline = Date.now() + timeoutMs
+
+  for (;;) {
+    const frame = page.frames().find((candidate) => candidate.url().includes("codisto"))
+    if (frame) {
+      return frame
+    }
+    if (Date.now() >= deadline) {
+      throw new Error("Marketplace Connect frame was not found")
+    }
+    await wait(250)
+  }
+}
+
 /** Waits for the Codisto tab to be idle before acting on it: resolves the frame, then settles. */
 export const waitForFrameSettled = async (page: Page, options: SettleOptions = {}) => {
-  await page.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
-  const frame = page.frames().find((candidate) => candidate.url().includes("codisto"))
-
-  if (!frame) {
-    throw new Error("Marketplace Connect frame was not found")
-  }
-
+  const frame = await findCodistoFrame(page)
   await waitForFrameLoaders(frame, options)
 }

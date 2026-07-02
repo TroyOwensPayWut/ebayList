@@ -1,5 +1,7 @@
 import type { Frame, Page } from "playwright"
 
+import { findCodistoFrame } from "./pageLoad.js"
+
 type ExtractedRow = {
   sku: string
   title: string
@@ -96,17 +98,7 @@ export const findNextAvailableEbaySku = async (page: Page, startSku?: string): P
   }
 }
 
-const getListingsFrame = async (page: Page) => {
-  await page.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
-
-  const frame = page.frames().find((candidate) => candidate.url().includes("shopui.codisto.com"))
-
-  if (!frame) {
-    throw new Error("Marketplace Connect frame was not found")
-  }
-
-  return frame
-}
+const getListingsFrame = findCodistoFrame
 
 // The Codisto grid is a flat set of `.cell.colN.rowM` divs, each carrying
 // data-row (viewport row index) and data-column-class (stable column id). We group

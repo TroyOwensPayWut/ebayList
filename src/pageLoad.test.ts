@@ -30,4 +30,26 @@ const scripted = (seq: boolean[]) => {
 // 3. never settles -> throws on timeout
 await assert.rejects(() => waitUntilIdle(async () => true, fast), /Timed out/)
 
+// --- findCodistoFrame: the iframe can attach with a blank URL before it resolves to codisto ---
+import { findCodistoFrame } from "./pageLoad.js"
+import type { Page } from "playwright"
+
+const fakePage = (urls: string[][]) => {
+  let i = 0
+  return {
+    locator: () => ({ first: () => ({ waitFor: async () => {} }) }),
+    frames: () => (urls[Math.min(i++, urls.length - 1)] ?? []).map((url) => ({ url: () => url })),
+  } as unknown as Page
+}
+
+// 4. frame URL resolves late -> found by polling instead of failing on first look
+{
+  const page = fakePage([["about:blank"], ["about:blank"], ["https://shopui.codisto.com/x"]])
+  const frame = await findCodistoFrame(page, 5000)
+  assert.match(frame.url(), /codisto/)
+}
+
+// 5. frame never resolves -> throws after the timeout
+await assert.rejects(() => findCodistoFrame(fakePage([["about:blank"]]), 300), /Marketplace Connect frame was not found/)
+
 console.log("pageLoad: all assertions passed")
