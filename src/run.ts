@@ -9,6 +9,7 @@ import { isValidCategoryId, setEbayCategory } from "./categories.js"
 import { applyReturnPolicyToAllProducts } from "./returnPolicies.js"
 import { setPaymentPolicy } from "./paymentPolicies.js"
 import { findNextAvailableEbaySku } from "./nextAvailableProduct.js"
+import { getListingsFrame, searchForSku } from "./grid.js"
 import { launchAuthenticated } from "./shopify.js"
 import { waitForFrameSettled } from "./pageLoad.js"
 import type { AppConfig } from "./types.js"
@@ -57,7 +58,11 @@ export const runListingLoop = async (config: AppConfig) => {
       }
 
       const { sku, title } = next
-      console.log(`Found ${sku} — ${title || "(no title)"}. Looking up eBay category on Google...`)
+      console.log(`Found ${sku} — ${title || "(no title)"}. Searching edit tab for ${sku}...`)
+      await waitForFrameSettled(editPage)
+      await searchForSku(await getListingsFrame(editPage), sku)
+
+      console.log("Looking up eBay category on Google...")
       await googlePage.goto(`https://www.google.com/search?q=${encodeURIComponent(`eBay category for ${title}`)}`)
 
       const choice = await promptAction(rl, sku, title)
