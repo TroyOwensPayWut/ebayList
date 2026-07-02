@@ -11,6 +11,8 @@ import { setPaymentPolicy } from "./paymentPolicies.js"
 import { findNextAvailableEbaySku } from "./nextAvailableProduct.js"
 import { getListingsFrame, searchForSku } from "./grid.js"
 import { openFirstShopifyProduct, searchShopifyProductsBySku } from "./shopifyProducts.js"
+import { extractProductWeightLb } from "./productWeight.js"
+import { setShippingPolicyByWeight } from "./shippingPolicies.js"
 import { launchAuthenticated } from "./shopify.js"
 import { waitForFrameSettled } from "./pageLoad.js"
 import type { AppConfig } from "./types.js"
@@ -72,6 +74,21 @@ export const runListingLoop = async (config: AppConfig) => {
         const opened = await openFirstShopifyProduct(shopifyPage)
         if (!opened.ok) {
           console.error(`Could not open Shopify product for ${sku}: ${opened.error}`)
+        } else {
+          // Weight-based shipping policy; failures are non-fatal (set it manually).
+          const weight = await extractProductWeightLb(shopifyPage)
+          if (!weight.ok) {
+            console.error(`Could not extract weight for ${sku}: ${weight.error}`)
+          } else {
+            console.log(`Weight: ${weight.weightLb} lb. Setting shipping policy...`)
+            await waitForFrameSettled(editPage)
+            const shipping = await setShippingPolicyByWeight(editPage, sku, weight.weightLb)
+            if (shipping.ok) {
+              console.log(`Shipping policy set: "${shipping.policyName}".`)
+            } else {
+              console.error(`Shipping policy failed for ${sku}: ${shipping.error}`)
+            }
+          }
         }
       }
 
