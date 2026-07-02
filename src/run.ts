@@ -10,6 +10,7 @@ import { applyReturnPolicyToAllProducts } from "./returnPolicies.js"
 import { setPaymentPolicy } from "./paymentPolicies.js"
 import { findNextAvailableEbaySku } from "./nextAvailableProduct.js"
 import { getListingsFrame, searchForSku } from "./grid.js"
+import { searchShopifyProductsBySku } from "./shopifyProducts.js"
 import { launchAuthenticated } from "./shopify.js"
 import { waitForFrameSettled } from "./pageLoad.js"
 import type { AppConfig } from "./types.js"
@@ -28,6 +29,9 @@ export const runListingLoop = async (config: AppConfig) => {
     const editPage = await openCodistoPage(context, config.listingsUrl) // SKU search + edit here
     console.log("Edit tab ready.")
     const googlePage = await context.newPage() // reused each loop for the category lookup
+    const shopifyPage = await context.newPage() // reused each loop for the Shopify admin product search
+    console.log(`Opening Shopify admin products tab at ${config.productsUrl}...`)
+    await shopifyPage.goto(config.productsUrl, { waitUntil: "domcontentloaded" })
 
     console.log("Applying standard filters (Has images, quantity >= 1, payment policy not set)...")
     await waitForFrameSettled(searchPage)
@@ -61,6 +65,12 @@ export const runListingLoop = async (config: AppConfig) => {
       console.log(`Found ${sku} — ${title || "(no title)"}. Searching edit tab for ${sku}...`)
       await waitForFrameSettled(editPage)
       await searchForSku(await getListingsFrame(editPage), sku)
+
+      console.log(`Searching Shopify admin for ${sku}...`)
+      const shopifySearch = await searchShopifyProductsBySku(shopifyPage, config.productsUrl, sku)
+      if (!shopifySearch.ok) {
+        console.error(`Shopify admin search failed for ${sku}: ${shopifySearch.error}`)
+      }
 
       console.log("Looking up eBay category on Google...")
       await googlePage.goto(`https://www.google.com/search?q=${encodeURIComponent(`eBay category for ${title}`)}`)
