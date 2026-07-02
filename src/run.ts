@@ -1,22 +1,25 @@
 import readline from "node:readline/promises"
 import { stdin as input, stdout as output } from "node:process"
 
-import type { BrowserContext, Page } from "playwright"
+import type { BrowserContext, Frame, Page } from "playwright"
 
 import { applyStandardFilters } from "./filters.js"
-import { enableEbayProduct } from "./listings.js"
-import { isValidCategoryId, setEbayCategory } from "./categories.js"
+import { STATUS_ENABLED } from "./listings.js"
+import { isValidCategoryId } from "./categories.js"
 import { applyReturnPolicyToAllProducts } from "./returnPolicies.js"
-import { setPaymentPolicy } from "./paymentPolicies.js"
+import { resolveImmediatePayPolicyId } from "./paymentPolicies.js"
 import { findNextAvailableEbaySku } from "./nextAvailableProduct.js"
-import { getListingsFrame, searchForSku } from "./grid.js"
+import { commitGrid, findRowIndex, getListingsFrame, searchForSku, setAndCommit } from "./grid.js"
 import { openFirstShopifyProduct, searchShopifyProductsBySku } from "./shopifyProducts.js"
 import { extractProductWeightLb } from "./productWeight.js"
-import { setShippingPolicyByWeight } from "./shippingPolicies.js"
+import { resolveShippingPolicyId, shippingPolicyForWeightLb } from "./shippingPolicies.js"
 import { launchAuthenticated } from "./shopify.js"
 import { waitForFrameSettled } from "./pageLoad.js"
 import type { AppConfig } from "./types.js"
 
+// Per-product order (everything STAGES on the grid row; one commit at the end saves it all):
+// find product > search edit tab > google category lookup > get weight > stage shipping
+// > wait for user (category/skip/quit) > stage category > stage payment > stage enabled > save.
 export const runListingLoop = async (config: AppConfig) => {
   console.log("Launching authenticated browser...")
   const context = await launchAuthenticated(config)
@@ -53,6 +56,7 @@ export const runListingLoop = async (config: AppConfig) => {
     let listedCount = 0
 
     for (;;) {
+      // 1. Find the next product.
       console.log(`\nScanning for next available product${lastSku ? ` after ${lastSku}` : ""}...`)
       await waitForFrameSettled(searchPage)
       const next = await findNextAvailableEbaySku(searchPage, lastSku)
@@ -62,11 +66,19 @@ export const runListingLoop = async (config: AppConfig) => {
       }
 
       const { sku, title } = next
+
+      // 2. Search the edit tab (Codisto) for the product.
       console.log(`Found ${sku} — ${title || "(no title)"}. Searching edit tab for ${sku}...`)
       await waitForFrameSettled(editPage)
-      await searchForSku(await getListingsFrame(editPage), sku)
+      const editFrame = await getListingsFrame(editPage)
+      await searchForSku(editFrame, sku)
 
-      console.log(`Searching Shopify admin for ${sku}...`)
+      // 3. Category lookup on Google.
+      console.log("Looking up eBay category ID on Google...")
+      await googlePage.goto(`https://www.google.com/search?q=${encodeURIComponent(`eBay category ID for ${title}`)}`)
+
+      // 4. Get the weight from Shopify (failures are non-fatal — set shipping manually).
+      let weightLb: number | undefined
       const shopifySearch = await searchShopifyProductsBySku(shopifyPage, config.productsUrl, sku)
       if (!shopifySearch.ok) {
         console.error(`Shopify admin search failed for ${sku}: ${shopifySearch.error}`)
@@ -75,66 +87,79 @@ export const runListingLoop = async (config: AppConfig) => {
         if (!opened.ok) {
           console.error(`Could not open Shopify product for ${sku}: ${opened.error}`)
         } else {
-          // Weight-based shipping policy; failures are non-fatal (set it manually).
           const weight = await extractProductWeightLb(shopifyPage)
-          if (!weight.ok) {
-            console.error(`Could not extract weight for ${sku}: ${weight.error}`)
+          if (weight.ok) {
+            weightLb = weight.weightLb
           } else {
-            console.log(`Weight: ${weight.weightLb} lb. Setting shipping policy...`)
-            await waitForFrameSettled(editPage)
-            const shipping = await setShippingPolicyByWeight(editPage, sku, weight.weightLb)
-            if (shipping.ok) {
-              console.log(`Shipping policy set: "${shipping.policyName}".`)
-            } else {
-              console.error(`Shipping policy failed for ${sku}: ${shipping.error}`)
-            }
+            console.error(`Could not extract weight for ${sku}: ${weight.error}`)
           }
         }
       }
 
-      console.log("Looking up eBay category ID on Google...")
-      await googlePage.goto(`https://www.google.com/search?q=${encodeURIComponent(`eBay category ID for ${title}`)}`)
+      // 5. Stage the weight-tier shipping policy (saved by the final commit).
+      let staged = false
+      if (weightLb !== undefined) {
+        const shipping = await stageShippingPolicy(editFrame, sku, weightLb)
+        if (shipping.ok) {
+          staged = true
+          console.log(`Weight: ${weightLb} lb → shipping policy "${shipping.policyName}" staged.`)
+        } else {
+          console.error(`Shipping policy failed for ${sku}: ${shipping.error}`)
+        }
+      }
 
+      // 6. Wait for the user.
       const choice = await promptAction(rl, sku, title)
 
       if (choice.action === "quit") {
+        // Staged-but-uncommitted changes die with the browser — no cleanup needed.
         console.log(`Quitting. Listed ${listedCount} product(s) this run.`)
         break
       }
 
       if (choice.action === "skip") {
+        if (staged) {
+          await discardStaged(editPage) // drop staged shipping so it can't ride along with the next product's save
+        }
         console.log(`Skipped ${sku}.`)
         lastSku = sku
         continue
       }
 
-      const answer = choice.category
-      console.log(`Setting category #${answer} for ${sku}...`)
-      await waitForFrameSettled(editPage)
-      const category = await setEbayCategory(editPage, sku, answer)
-      if (!category.ok) {
-        console.error(`Category failed for ${sku}: ${category.error}`)
+      // 7–9. Stage category, payment policy, and enabled status on the same row.
+      console.log(`Staging category #${choice.category}, payment policy, and enable for ${sku}...`)
+      const paymentPolicyId = await resolveImmediatePayPolicyId(editFrame)
+      const stages: Array<[label: string, column: string, value: unknown]> = [
+        ["Category", "primarycategoryid", Number(choice.category)],
+        ["Payment policy", "paymentpolicyid", paymentPolicyId],
+        ["Enable", "status", STATUS_ENABLED],
+      ]
+
+      let stageError: string | undefined
+      for (const [label, column, value] of stages) {
+        const result = await stageRowValue(editFrame, sku, column, value)
+        if (!result.ok) {
+          stageError = `${label} failed for ${sku}: ${result.error}`
+          break
+        }
+      }
+
+      if (stageError) {
+        console.error(stageError)
+        await discardStaged(editPage)
         lastSku = sku
         continue
       }
 
-      console.log(`Category set. Setting immediate-pay payment policy for ${sku}...`)
-      await waitForFrameSettled(editPage)
-      const payment = await setPaymentPolicy(editPage, sku)
-      if (!payment.ok) {
-        console.error(`Payment policy failed for ${sku}: ${payment.error}`)
-        lastSku = sku
-        continue
-      }
-
-      console.log(`Payment policy set. Enabling ${sku} on eBay...`)
-      await waitForFrameSettled(editPage)
-      const enabled = await enableEbayProduct(editPage, sku)
-      if (enabled.ok) {
+      // 10. Save — one commit persists shipping + category + payment + enabled together.
+      console.log(`Saving ${sku}...`)
+      const saved = await commitGrid(editFrame)
+      if (saved.ok) {
         listedCount += 1
-        console.log(`Listed ${sku} under category #${answer}. (${listedCount} listed this run)`)
+        console.log(`Listed ${sku} under category #${choice.category}. (${listedCount} listed this run)`)
       } else {
-        console.error(`Enable failed for ${sku}: ${enabled.error}`)
+        console.error(`Save failed for ${sku}: ${saved.error}`)
+        await discardStaged(editPage)
       }
 
       lastSku = sku
@@ -144,6 +169,51 @@ export const runListingLoop = async (config: AppConfig) => {
     rl.close()
     await context.close()
   }
+}
+
+/** Stage one column on the SKU's row without committing (the final save commits everything). */
+const stageRowValue = async (
+  frame: Frame,
+  sku: string,
+  column: string,
+  value: unknown,
+): Promise<{ ok: true } | { ok: false; error: string }> => {
+  const located = await findRowIndex(frame, sku)
+  if (located.status === "nogrid") return { ok: false, error: "Codisto grid was not found on the page" }
+  if (located.status === "notfound") return { ok: false, error: `No listing found for SKU '${sku}'` }
+  if (located.status === "multiple") return { ok: false, error: `Found ${located.count} listings for SKU '${sku}'` }
+
+  await setAndCommit(frame, located.index, column, value, false)
+  return { ok: true }
+}
+
+/** Picks the weight tier and stages it as the SKU's shipping policy (no commit). */
+const stageShippingPolicy = async (
+  frame: Frame,
+  sku: string,
+  weightLb: number,
+): Promise<{ ok: true; policyName: string } | { ok: false; error: string }> => {
+  const policyName = shippingPolicyForWeightLb(weightLb)
+  if (!policyName) {
+    return { ok: false, error: `No shipping policy tier for weight ${weightLb} lb` }
+  }
+
+  const policyId = await resolveShippingPolicyId(frame, policyName)
+  if (!policyId) {
+    return { ok: false, error: `Policy "${policyName}" not found in the grid's shipping policy list` }
+  }
+
+  const staged = await stageRowValue(frame, sku, "shippingpolicyid", policyId)
+  return staged.ok ? { ok: true, policyName } : staged
+}
+
+// A reload is the only reliable way to drop staged-but-uncommitted grid changes
+// (grid.ts: staged data rides along with the NEXT commit otherwise).
+const discardStaged = async (page: Page) => {
+  console.log("Discarding staged changes...")
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await page.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
+  await waitForFrameSettled(page)
 }
 
 type Action = { action: "category"; category: string } | { action: "skip" } | { action: "quit" }

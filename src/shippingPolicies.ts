@@ -1,6 +1,6 @@
 import type { Frame, Page } from "playwright"
 
-import { getListingsFrame, saveRowValue } from "./grid.js"
+import { getListingsFrame, resolveSelectValueByLabel, saveRowValue } from "./grid.js"
 
 // Weight-tiered eBay shipping policies, exactly as named in the policy dropdown.
 // Sorted by upper bound; first tier whose max the weight fits under wins
@@ -36,15 +36,8 @@ export const shippingPolicyForWeightLb = (weightLb: number): string | null => {
 
 // Policy IDs are resolved live from the grid's select#shippingpolicyid by label
 // (instead of hardcoding 15 IDs) so re-created policies keep working.
-export const resolveShippingPolicyId = async (frame: Frame, policyName: string): Promise<string | null> =>
-  frame.evaluate((wanted) => {
-    const select = document.querySelector<HTMLSelectElement>("select#shippingpolicyid")
-    if (!select) return null
-    for (const option of Array.from(select.options)) {
-      if (option.label.trim() === wanted) return option.value
-    }
-    return null
-  }, policyName)
+export const resolveShippingPolicyId = (frame: Frame, policyName: string): Promise<string | null> =>
+  resolveSelectValueByLabel(frame, "shippingpolicyid", policyName)
 
 export type SetShippingPolicyResult =
   | { ok: true; sku: string; weightLb: number; policyName: string; policyId: string }

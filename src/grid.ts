@@ -50,6 +50,10 @@ export const findRowIndex = async (frame: Frame, sku: string): Promise<LocateRes
       for (let i = 0; i < ds.data.length; i += 1) {
         const rec = ds.data[i]
         if (!rec) continue
+        // A row without its key is still streaming in — commit() POSTs changes as
+        // {key, data}, so an undefined key makes the server silently DROP the change
+        // while the grid still reports "saved". Keep polling until the key exists.
+        if (typeof rec.key !== "number") continue
         const row = rec.currentData || rec.baseData || {}
         const code = typeof row.code === "string" ? row.code.trim().toLowerCase() : ""
         if (code && code === want) {
@@ -92,6 +96,34 @@ export const setAndCommit = async (frame: Frame, index: number, column: string, 
     },
     { index, column, value, commit },
   )
+}
+
+/** Resolve a grid dropdown option's value by its visible label (e.g. select#shippingpolicyid). */
+export const resolveSelectValueByLabel = async (frame: Frame, selectId: string, label: string): Promise<string | null> =>
+  frame.evaluate(
+    ({ selectId, label }) => {
+      const select = document.querySelector<HTMLSelectElement>(`select#${selectId}`)
+      if (!select) return null
+      for (const option of Array.from(select.options)) {
+        if (option.label.trim() === label) return option.value
+      }
+      return null
+    },
+    { selectId, label },
+  )
+
+/** Commits ALL staged changes in one savedata POST and waits for the server to accept. */
+export const commitGrid = async (frame: Frame): Promise<{ ok: true } | { ok: false; error: string }> => {
+  await frame.evaluate(() => {
+    const w = window as unknown as { $?: (s: unknown) => { data: (k: string) => unknown } }
+    const $ = w.$
+    const gridEl = document.getElementById("ebaytable")
+    if (!$ || !gridEl) throw new Error("Codisto grid disappeared before commit")
+    const inst = $(gridEl).data("codisto.grid") as { dataSet?: { commit: () => void } }
+    if (!inst?.dataSet) throw new Error("Codisto grid dataSet disappeared before commit")
+    inst.dataSet.commit()
+  })
+  return waitForCommit(frame)
 }
 
 // commit() clears dataSet dirty on server "ok"/"warning"; a rejected change leaves it dirty.

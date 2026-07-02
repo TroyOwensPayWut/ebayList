@@ -18,7 +18,7 @@ export type EnableEbayProductResult =
 // through the grid data layer (see grid.ts) — UI clicks only stage changes, which
 // made products enable one commit late. waitForCommit inside saveRowValue is the
 // persistence check: the grid only clears its dirty flag once the server accepts.
-const STATUS_ENABLED = -1
+export const STATUS_ENABLED = -1
 
 export const enableEbayProduct = async (page: Page, sku: string): Promise<EnableEbayProductResult> => {
   const normalizedSku = sku.trim()

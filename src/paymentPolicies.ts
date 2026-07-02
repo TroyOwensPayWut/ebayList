@@ -1,11 +1,16 @@
-import type { Page } from "playwright"
+import type { Frame, Page } from "playwright"
 
-import { saveRowValue } from "./grid.js"
+import { getListingsFrame, resolveSelectValueByLabel, saveRowValue } from "./grid.js"
 
-// The grid's `paymentpolicyid` column holds the eBay payment policy id. This is the
-// option value for "eBay Payments:Immediate pay" in select#paymentpolicyid, read live
-// from the bulk grid. The UI stages it as a string, so we do too.
+// The grid's `paymentpolicyid` column holds the eBay payment policy id. The id is
+// resolved live from select#paymentpolicyid by label so a re-created policy keeps
+// working; the hardcoded id is only a fallback for when the dropdown can't be read.
+const IMMEDIATE_PAY_LABEL = "eBay Payments:Immediate pay"
 const IMMEDIATE_PAY_POLICY_ID = "197165154026"
+
+/** Resolves the Immediate pay policy id from the grid dropdown, falling back to the last known id. */
+export const resolveImmediatePayPolicyId = async (frame: Frame): Promise<string> =>
+  (await resolveSelectValueByLabel(frame, "paymentpolicyid", IMMEDIATE_PAY_LABEL)) ?? IMMEDIATE_PAY_POLICY_ID
 
 export type SetPaymentPolicyResult =
   | {
@@ -22,7 +27,7 @@ export type SetPaymentPolicyResult =
 export const setPaymentPolicy = async (
   page: Page,
   sku: string,
-  policyId = IMMEDIATE_PAY_POLICY_ID,
+  policyId?: string,
   options: { commit?: boolean } = {},
 ): Promise<SetPaymentPolicyResult> => {
   const normalizedSku = sku.trim()
@@ -32,7 +37,8 @@ export const setPaymentPolicy = async (
   }
 
   try {
-    const saved = await saveRowValue(page, normalizedSku, "paymentpolicyid", policyId, options)
+    const id = policyId ?? (await resolveImmediatePayPolicyId(await getListingsFrame(page)))
+    const saved = await saveRowValue(page, normalizedSku, "paymentpolicyid", id, options)
     return saved.ok
       ? { ok: true, sku: normalizedSku }
       : { ok: false, sku: normalizedSku, error: saved.error }
