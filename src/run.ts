@@ -10,7 +10,7 @@ import { applyReturnPolicyToAllProducts } from "./returnPolicies.js"
 import { setPaymentPolicy } from "./paymentPolicies.js"
 import { findNextAvailableEbaySku } from "./nextAvailableProduct.js"
 import { getListingsFrame, searchForSku } from "./grid.js"
-import { searchShopifyProductsBySku } from "./shopifyProducts.js"
+import { openFirstShopifyProduct, searchShopifyProductsBySku } from "./shopifyProducts.js"
 import { launchAuthenticated } from "./shopify.js"
 import { waitForFrameSettled } from "./pageLoad.js"
 import type { AppConfig } from "./types.js"
@@ -68,10 +68,15 @@ export const runListingLoop = async (config: AppConfig) => {
       const shopifySearch = await searchShopifyProductsBySku(shopifyPage, config.productsUrl, sku)
       if (!shopifySearch.ok) {
         console.error(`Shopify admin search failed for ${sku}: ${shopifySearch.error}`)
+      } else {
+        const opened = await openFirstShopifyProduct(shopifyPage)
+        if (!opened.ok) {
+          console.error(`Could not open Shopify product for ${sku}: ${opened.error}`)
+        }
       }
 
-      console.log("Looking up eBay category on Google...")
-      await googlePage.goto(`https://www.google.com/search?q=${encodeURIComponent(`eBay category for ${title}`)}`)
+      console.log("Looking up eBay category ID on Google...")
+      await googlePage.goto(`https://www.google.com/search?q=${encodeURIComponent(`eBay category ID for ${title}`)}`)
 
       const choice = await promptAction(rl, sku, title)
 
