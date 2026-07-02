@@ -87,9 +87,11 @@ export const findRowIndex = async (frame: Frame, sku: string): Promise<LocateRes
 }
 
 // Stage a column value on the row and commit (POSTs savedata to Codisto).
-export const setAndCommit = async (frame: Frame, index: number, column: string, value: unknown) => {
+// commit:false only stages — nothing is saved until the grid's next commit,
+// and a page reload discards it (used by dry-run probes).
+export const setAndCommit = async (frame: Frame, index: number, column: string, value: unknown, commit = true) => {
   await frame.evaluate(
-    ({ index, column, value }) => {
+    ({ index, column, value, commit }) => {
       const w = window as unknown as { $?: (s: unknown) => { data: (k: string) => unknown } }
       const $ = w.$
       const gridEl = document.getElementById("ebaytable")
@@ -100,9 +102,9 @@ export const setAndCommit = async (frame: Frame, index: number, column: string, 
       const ds = inst?.dataSet
       if (!ds) throw new Error("Codisto grid dataSet disappeared before commit")
       ds.set(index, column, value)
-      ds.commit()
+      if (commit) ds.commit()
     },
-    { index, column, value },
+    { index, column, value, commit },
   )
 }
 
@@ -136,7 +138,9 @@ export const saveRowValue = async (
   sku: string,
   column: string,
   value: unknown,
+  options: { commit?: boolean } = {},
 ): Promise<{ ok: true; index: number } | { ok: false; error: string }> => {
+  const commit = options.commit ?? true
   const frame = await getListingsFrame(page)
   await searchForSku(frame, sku)
 
@@ -151,7 +155,11 @@ export const saveRowValue = async (
     return { ok: false, error: `Found ${located.count} listings for SKU '${sku}'` }
   }
 
-  await setAndCommit(frame, located.index, column, value)
+  await setAndCommit(frame, located.index, column, value, commit)
+
+  if (!commit) {
+    return { ok: true, index: located.index } // staged only; caller verifies/discards
+  }
 
   const settled = await waitForCommit(frame)
   return settled.ok ? { ok: true, index: located.index } : settled

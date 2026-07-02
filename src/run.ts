@@ -7,6 +7,7 @@ import { applyStandardFilters } from "./filters.js"
 import { enableEbayProduct } from "./listings.js"
 import { isValidCategoryId, setEbayCategory } from "./categories.js"
 import { applyReturnPolicyToAllProducts } from "./returnPolicies.js"
+import { setPaymentPolicy } from "./paymentPolicies.js"
 import { findNextAvailableEbaySku } from "./nextAvailableProduct.js"
 import { launchAuthenticated } from "./shopify.js"
 import { waitForFrameSettled } from "./pageLoad.js"
@@ -82,7 +83,16 @@ export const runListingLoop = async (config: AppConfig) => {
         continue
       }
 
-      console.log(`Category set. Enabling ${sku} on eBay...`)
+      console.log(`Category set. Setting immediate-pay payment policy for ${sku}...`)
+      await waitForFrameSettled(editPage)
+      const payment = await setPaymentPolicy(editPage, sku)
+      if (!payment.ok) {
+        console.error(`Payment policy failed for ${sku}: ${payment.error}`)
+        lastSku = sku
+        continue
+      }
+
+      console.log(`Payment policy set. Enabling ${sku} on eBay...`)
       await waitForFrameSettled(editPage)
       const enabled = await enableEbayProduct(editPage, sku)
       if (enabled.ok) {
