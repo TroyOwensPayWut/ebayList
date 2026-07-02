@@ -22,16 +22,14 @@ export const runListingLoop = async (config: AppConfig) => {
   const rl = readline.createInterface({ input, output })
 
   try {
+    // The auth check already left the first tab on the Shopify products page — reuse it as the product search tab.
+    const shopifyPage = context.pages()[0] // reused each loop for the Shopify admin product search
     console.log(`Opening search tab at ${config.listingsUrl} (waiting for Marketplace Connect to load)...`)
-    // Reuse the existing login-check tab so we don't leave a stray products page open.
-    const searchPage = await openCodistoPage(context, config.listingsUrl, context.pages()[0]) // finder scrolls here
+    const searchPage = await openCodistoPage(context, config.listingsUrl) // finder scrolls here
     console.log("Search tab ready. Opening edit tab...")
     const editPage = await openCodistoPage(context, config.listingsUrl) // SKU search + edit here
     console.log("Edit tab ready.")
     const googlePage = await context.newPage() // reused each loop for the category lookup
-    const shopifyPage = await context.newPage() // reused each loop for the Shopify admin product search
-    console.log(`Opening Shopify admin products tab at ${config.productsUrl}...`)
-    await shopifyPage.goto(config.productsUrl, { waitUntil: "domcontentloaded" })
 
     console.log("Applying standard filters (Has images, quantity >= 1, payment policy not set)...")
     await waitForFrameSettled(searchPage)
@@ -164,8 +162,8 @@ const promptAction = async (
   }
 }
 
-const openCodistoPage = async (context: BrowserContext, productsUrl: string, existingPage?: Page): Promise<Page> => {
-  const page = existingPage ?? (await context.newPage())
+const openCodistoPage = async (context: BrowserContext, productsUrl: string): Promise<Page> => {
+  const page = await context.newPage()
   await page.goto(productsUrl, { waitUntil: "domcontentloaded" })
   await page.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
   return page
