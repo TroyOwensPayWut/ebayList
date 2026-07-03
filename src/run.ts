@@ -66,6 +66,8 @@ export const runListingLoop = async (config: AppConfig) => {
 
     let lastSku: string | undefined
     let listedCount = 0
+    const startedAt = new Date()
+    console.log(`Run started at ${startedAt.toLocaleTimeString()}.`)
 
     for (;;) {
       // 1. Find the next product.
@@ -179,6 +181,13 @@ export const runListingLoop = async (config: AppConfig) => {
 
       lastSku = sku
     }
+
+    const endedAt = new Date()
+    const minutes = (endedAt.getTime() - startedAt.getTime()) / 60000
+    console.log(
+      `Run ended at ${endedAt.toLocaleTimeString()} (${minutes.toFixed(1)} min). ` +
+        `Listed ${listedCount} product(s) — ${(minutes > 0 ? listedCount / minutes : 0).toFixed(2)} per minute.`,
+    )
   } finally {
     console.log("Closing browser...")
     rl.close()
