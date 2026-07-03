@@ -102,6 +102,36 @@ export const findNextAvailableEbaySku = async (page: Page, startSku?: string): P
 
 const getListingsFrame = findCodistoFrame
 
+/**
+ * Checks whether one specific SKU's row is listable (disabled, no error badge).
+ * Meant for a grid already narrowed by the search box — the free-text search can
+ * match sibling SKUs, so this finds the EXACT row rather than the first available one.
+ * Polls while search results stream in.
+ */
+export const checkSkuListable = async (page: Page, sku: string): Promise<FindNextAvailableEbaySkuResult> => {
+  try {
+    const frame = await getListingsFrame(page)
+    const wanted = sku.trim().toLowerCase()
+    const deadline = Date.now() + 15000
+
+    for (;;) {
+      const row = (await extractVisibleRows(frame)).find((candidate) => candidate.sku.toLowerCase() === wanted)
+      if (row) {
+        if (row.enabled === false && !row.hasError) {
+          return { ok: true, sku: row.sku, title: row.title ?? "" }
+        }
+        return { ok: false, error: row.hasError ? "row has an error badge" : "already enabled" }
+      }
+      if (Date.now() >= deadline) {
+        return { ok: false, error: `SKU ${sku} was not found in the grid` }
+      }
+      await frame.page().waitForTimeout(500)
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 // The Codisto grid is a flat set of `.cell.colN.rowM` divs, each carrying
 // data-row (viewport row index) and data-column-class (stable column id). We group
 // cells by data-row and read the columns we care about:

@@ -8,7 +8,7 @@ import { STATUS_ENABLED } from "./listings.js"
 import { isValidCategoryId } from "./categories.js"
 import { applyReturnPolicyToAllProducts, resolveReturnPolicyId } from "./returnPolicies.js"
 import { resolveImmediatePayPolicyId } from "./paymentPolicies.js"
-import { findNextAvailableEbaySku } from "./nextAvailableProduct.js"
+import { checkSkuListable, findNextAvailableEbaySku } from "./nextAvailableProduct.js"
 import { commitGrid, findRowIndex, getListingsFrame, searchForSku, setAndCommit } from "./grid.js"
 import { discardGrid } from "./discard.js"
 import { openFirstShopifyProduct, searchShopifyProductsBySku } from "./shopifyProducts.js"
@@ -85,9 +85,9 @@ export const runListingLoop = async (config: AppConfig) => {
       await waitForFrameSettled(motorsEditPage)
       const motorsEditFrame = await getListingsFrame(motorsEditPage)
       await searchForSku(motorsEditFrame, sku)
-      const motorsCheck = await findNextAvailableEbaySku(motorsEditPage)
-      if (!motorsCheck.ok || motorsCheck.sku.toLowerCase() !== sku.toLowerCase()) {
-        console.log(`Skipping ${sku} — not listable on eBay Motors (${motorsCheck.ok ? "search matched a different SKU" : motorsCheck.error}).`)
+      const motorsCheck = await checkSkuListable(motorsEditPage, sku)
+      if (!motorsCheck.ok) {
+        console.log(`Skipping ${sku} — not listable on eBay Motors (${motorsCheck.error}).`)
         lastSku = sku
         continue
       }
