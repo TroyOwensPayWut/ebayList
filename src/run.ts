@@ -17,10 +17,12 @@ import { launchAuthenticated } from "./shopify.js"
 import { waitForFrameSettled } from "./pageLoad.js"
 import type { AppConfig } from "./types.js"
 
-// Per-product order (everything STAGES on the grid row; one commit at the end saves it all):
-// find product > google category lookup > get weight > search both edit tabs
+// Per-product order (defaults STAGE on BOTH grids before the prompt so the user can
+// override them in either grid; one commit on the chosen grid saves it all):
+// find product > google category lookup > get weight
+// > search both edit tabs + stage defaults (shipping, payment, enabled) on each
 // > wait for user (marketplace + category / skip / quit)
-// > stage shipping > stage category > stage payment > stage enabled > save.
+// > stage category on chosen grid > save chosen > discard the other grid's staged defaults.
 export const runListingLoop = async (config: AppConfig) => {
   console.log("Launching authenticated browser...")
   const context = await launchAuthenticated(config)
@@ -99,70 +101,54 @@ export const runListingLoop = async (config: AppConfig) => {
         }
       }
 
-      // 4. Search both edit tabs (eBay, then eBay Motors) so the user can see the product on both surfaces while deciding.
-      console.log(`Searching eBay and eBay Motors edit tabs for ${sku}...`)
+      // 4. Search both edit tabs and stage the defaults (shipping, payment, enabled) on each,
+      // so the user can see AND override them in either grid before choosing where to list.
+      console.log(`Searching eBay and eBay Motors edit tabs for ${sku} and staging defaults...`)
       await waitForFrameSettled(editPage)
       const ebayEditFrame = await getListingsFrame(editPage)
       await searchForSku(ebayEditFrame, sku)
+      await stageDefaults(ebayEditFrame, "eBay", sku, weightLb)
       await waitForFrameSettled(motorsEditPage)
       const motorsEditFrame = await getListingsFrame(motorsEditPage)
       await searchForSku(motorsEditFrame, sku)
+      await stageDefaults(motorsEditFrame, "eBay Motors", sku, weightLb)
 
-      // 5. Wait for the user (marketplace + category, skip, or quit). Nothing is staged yet.
+      // 5. Wait for the user (marketplace + category, skip, or quit). The user may
+      // edit any staged default in either grid here — those edits stage on top and win.
       const choice = await promptAction(rl, sku, title)
 
       if (choice.action === "quit") {
+        // context.close() drops all staged (client-side) changes — no discard needed.
         console.log(`Quitting. Listed ${listedCount} product(s) this run.`)
         break
       }
 
       if (choice.action === "skip") {
         console.log(`Skipped ${sku}.`)
+        await discardStaged(editPage)
+        await discardStaged(motorsEditPage)
         lastSku = sku
         continue
       }
 
-      // 6. Stage everything on the chosen marketplace's already-searched frame.
+      // 6. Stage only the category on the chosen grid (everything else is already staged).
       const marketplaceLabel = choice.marketplace === "motors" ? "eBay Motors" : "eBay"
       const targetPage = choice.marketplace === "motors" ? motorsEditPage : editPage
+      const otherPage = choice.marketplace === "motors" ? editPage : motorsEditPage
       const editFrame = choice.marketplace === "motors" ? motorsEditFrame : ebayEditFrame
 
-      // 7. Stage the weight-tier shipping policy (saved by the final commit; failure non-fatal).
-      if (weightLb !== undefined) {
-        const shipping = await stageShippingPolicy(editFrame, sku, weightLb)
-        if (shipping.ok) {
-          console.log(`Weight: ${weightLb} lb → shipping policy "${shipping.policyName}" staged.`)
-        } else {
-          console.error(`Shipping policy failed for ${sku}: ${shipping.error}`)
-        }
-      }
-
-      // 8–10. Stage category, payment policy, and enabled status on the same row.
-      console.log(`Staging category #${choice.category}, payment policy, and enable for ${sku}...`)
-      const paymentPolicyId = await resolveImmediatePayPolicyId(editFrame)
-      const stages: Array<[label: string, column: string, value: unknown]> = [
-        ["Category", "primarycategoryid", Number(choice.category)],
-        ["Payment policy", "paymentpolicyid", paymentPolicyId],
-        ["Enable", "status", STATUS_ENABLED],
-      ]
-
-      let stageError: string | undefined
-      for (const [label, column, value] of stages) {
-        const result = await stageRowValue(editFrame, sku, column, value)
-        if (!result.ok) {
-          stageError = `${label} failed for ${sku}: ${result.error}`
-          break
-        }
-      }
-
-      if (stageError) {
-        console.error(stageError)
+      console.log(`Staging category #${choice.category} for ${sku}...`)
+      const category = await stageRowValue(editFrame, sku, "primarycategoryid", Number(choice.category))
+      if (!category.ok) {
+        console.error(`Category failed for ${sku}: ${category.error}`)
         await discardStaged(targetPage)
+        await discardStaged(otherPage)
         lastSku = sku
         continue
       }
 
-      // 11. Save — one commit persists shipping + category + payment + enabled together.
+      // 7. Save — one commit persists shipping + category + payment + enabled (with any
+      // user overrides) together, then drop the unchosen grid's staged defaults.
       console.log(`Saving ${sku}...`)
       const saved = await commitGrid(editFrame)
       if (saved.ok) {
@@ -172,6 +158,7 @@ export const runListingLoop = async (config: AppConfig) => {
         console.error(`Save failed for ${sku}: ${saved.error}`)
         await discardStaged(targetPage)
       }
+      await discardStaged(otherPage)
 
       lastSku = sku
     }
@@ -179,6 +166,34 @@ export const runListingLoop = async (config: AppConfig) => {
     console.log("Closing browser...")
     rl.close()
     await context.close()
+  }
+}
+
+/**
+ * Stages the defaults (weight-tier shipping, payment policy, enabled) on the SKU's row —
+ * no commit, so the user can override any of them in the grid before choosing.
+ * Failures are non-fatal: they're logged and the user can set the value manually.
+ */
+const stageDefaults = async (frame: Frame, label: string, sku: string, weightLb: number | undefined) => {
+  if (weightLb !== undefined) {
+    const shipping = await stageShippingPolicy(frame, sku, weightLb)
+    if (shipping.ok) {
+      console.log(`${label}: weight ${weightLb} lb → shipping policy "${shipping.policyName}" staged.`)
+    } else {
+      console.error(`${label}: shipping policy failed for ${sku}: ${shipping.error}`)
+    }
+  }
+
+  const paymentPolicyId = await resolveImmediatePayPolicyId(frame)
+  const stages: Array<[label: string, column: string, value: unknown]> = [
+    ["Payment policy", "paymentpolicyid", paymentPolicyId],
+    ["Enable", "status", STATUS_ENABLED],
+  ]
+  for (const [stageLabel, column, value] of stages) {
+    const result = await stageRowValue(frame, sku, column, value)
+    if (!result.ok) {
+      console.error(`${label}: ${stageLabel} failed for ${sku}: ${result.error}`)
+    }
   }
 }
 
