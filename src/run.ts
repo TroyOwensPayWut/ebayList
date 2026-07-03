@@ -10,6 +10,7 @@ import { applyReturnPolicyToAllProducts } from "./returnPolicies.js"
 import { resolveImmediatePayPolicyId } from "./paymentPolicies.js"
 import { findNextAvailableEbaySku } from "./nextAvailableProduct.js"
 import { commitGrid, findRowIndex, getListingsFrame, searchForSku, setAndCommit } from "./grid.js"
+import { discardGrid } from "./discard.js"
 import { openFirstShopifyProduct, searchShopifyProductsBySku } from "./shopifyProducts.js"
 import { extractProductWeightLb } from "./productWeight.js"
 import { resolveShippingPolicyId, shippingPolicyForWeightLb } from "./shippingPolicies.js"
@@ -233,10 +234,13 @@ const stageShippingPolicy = async (
   return staged.ok ? { ok: true, policyName } : staged
 }
 
-// A reload is the only reliable way to drop staged-but-uncommitted grid changes
-// (grid.ts: staged data rides along with the NEXT commit otherwise).
+// Click the save bar's Discard button (discard.ts). Fall back to a reload if the
+// button fails — staged data would otherwise ride along with the NEXT commit.
 const discardStaged = async (page: Page) => {
   console.log("Discarding staged changes...")
+  const discarded = await discardGrid(page)
+  if (discarded.ok) return
+  console.error(`Discard button failed (${discarded.error}); reloading to drop staged changes.`)
   await page.reload({ waitUntil: "domcontentloaded" })
   await page.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
   await waitForFrameSettled(page)
