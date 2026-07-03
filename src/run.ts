@@ -6,7 +6,7 @@ import type { BrowserContext, Frame, Page } from "playwright"
 import { applyStandardFilters } from "./filters.js"
 import { STATUS_ENABLED } from "./listings.js"
 import { isValidCategoryId } from "./categories.js"
-import { applyReturnPolicyToAllProducts } from "./returnPolicies.js"
+import { applyReturnPolicyToAllProducts, resolveReturnPolicyId } from "./returnPolicies.js"
 import { resolveImmediatePayPolicyId } from "./paymentPolicies.js"
 import { findNextAvailableEbaySku } from "./nextAvailableProduct.js"
 import { commitGrid, findRowIndex, getListingsFrame, searchForSku, setAndCommit } from "./grid.js"
@@ -113,6 +113,11 @@ export const runListingLoop = async (config: AppConfig) => {
       const motorsEditFrame = await getListingsFrame(motorsEditPage)
       await searchForSku(motorsEditFrame, sku)
       await stageDefaults(motorsEditFrame, "eBay Motors", sku, weightLb)
+      // Motors only: the regular eBay grid already got the bulk return-policy apply at startup.
+      const returnPolicy = await stageRowValue(motorsEditFrame, sku, "returnpolicyid", await resolveReturnPolicyId(motorsEditFrame))
+      if (!returnPolicy.ok) {
+        console.error(`eBay Motors: Return policy failed for ${sku}: ${returnPolicy.error}`)
+      }
 
       // 5. Wait for the user (marketplace + category, skip, or quit). The user may
       // edit any staged default in either grid here — those edits stage on top and win.
