@@ -79,11 +79,24 @@ export const runListingLoop = async (config: AppConfig) => {
 
       const { sku, title } = next
 
-      // 2. Category lookup on Google.
+      // 2. Check the product is listable on eBay Motors (disabled, no error badge) —
+      // already-listed / errored products get skipped without any manual checking.
+      console.log(`Checking ${sku} on eBay Motors...`)
+      await waitForFrameSettled(motorsEditPage)
+      const motorsEditFrame = await getListingsFrame(motorsEditPage)
+      await searchForSku(motorsEditFrame, sku)
+      const motorsCheck = await findNextAvailableEbaySku(motorsEditPage)
+      if (!motorsCheck.ok || motorsCheck.sku.toLowerCase() !== sku.toLowerCase()) {
+        console.log(`Skipping ${sku} — not listable on eBay Motors (${motorsCheck.ok ? "search matched a different SKU" : motorsCheck.error}).`)
+        lastSku = sku
+        continue
+      }
+
+      // 3. Category lookup on Google.
       console.log(`Found ${sku} — ${title || "(no title)"}. Looking up eBay category ID on Google...`)
       await googlePage.goto(`https://www.google.com/search?q=${encodeURIComponent(`eBay category ID for ${title}`)}`)
 
-      // 3. Get the weight from Shopify (failures are non-fatal — set shipping manually).
+      // 4. Get the weight from Shopify (failures are non-fatal — set shipping manually).
       let weightLb: number | undefined
       const shopifySearch = await searchShopifyProductsBySku(shopifyPage, config.productsUrl, sku)
       if (!shopifySearch.ok) {
@@ -102,16 +115,14 @@ export const runListingLoop = async (config: AppConfig) => {
         }
       }
 
-      // 4. Search both edit tabs and stage the defaults (shipping, payment, enabled) on each,
-      // so the user can see AND override them in either grid before choosing where to list.
+      // 5. Search the eBay edit tab and stage the defaults (shipping, payment, enabled) on
+      // both grids, so the user can see AND override them in either grid before choosing
+      // where to list. (The Motors tab was already searched during the listability check.)
       console.log(`Searching eBay and eBay Motors edit tabs for ${sku} and staging defaults...`)
       await waitForFrameSettled(editPage)
       const ebayEditFrame = await getListingsFrame(editPage)
       await searchForSku(ebayEditFrame, sku)
       await stageDefaults(ebayEditFrame, "eBay", sku, weightLb)
-      await waitForFrameSettled(motorsEditPage)
-      const motorsEditFrame = await getListingsFrame(motorsEditPage)
-      await searchForSku(motorsEditFrame, sku)
       await stageDefaults(motorsEditFrame, "eBay Motors", sku, weightLb)
       // Motors only: the regular eBay grid already got the bulk return-policy apply at startup.
       const returnPolicy = await stageRowValue(motorsEditFrame, sku, "returnpolicyid", await resolveReturnPolicyId(motorsEditFrame))
@@ -119,7 +130,7 @@ export const runListingLoop = async (config: AppConfig) => {
         console.error(`eBay Motors: Return policy failed for ${sku}: ${returnPolicy.error}`)
       }
 
-      // 5. Wait for the user (marketplace + category, skip, or quit). The user may
+      // 6. Wait for the user (marketplace + category, skip, or quit). The user may
       // edit any staged default in either grid here — those edits stage on top and win.
       const choice = await promptAction(rl, sku, title)
 
@@ -137,7 +148,7 @@ export const runListingLoop = async (config: AppConfig) => {
         continue
       }
 
-      // 6. Stage only the category on the chosen grid (everything else is already staged).
+      // 7. Stage only the category on the chosen grid (everything else is already staged).
       const marketplaceLabel = choice.marketplace === "motors" ? "eBay Motors" : "eBay"
       const targetPage = choice.marketplace === "motors" ? motorsEditPage : editPage
       const otherPage = choice.marketplace === "motors" ? editPage : motorsEditPage
@@ -153,7 +164,7 @@ export const runListingLoop = async (config: AppConfig) => {
         continue
       }
 
-      // 7. Save — one commit persists shipping + category + payment + enabled (with any
+      // 8. Save — one commit persists shipping + category + payment + enabled (with any
       // user overrides) together, then drop the unchosen grid's staged defaults.
       console.log(`Saving ${sku}...`)
       const saved = await commitGrid(editFrame)
