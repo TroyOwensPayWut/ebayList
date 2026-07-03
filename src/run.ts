@@ -50,7 +50,13 @@ export const runListingLoop = async (config: AppConfig) => {
     if (!policy.ok) {
       throw new Error(policy.error)
     }
-    console.log(`Applied return policy "${policy.policyName}" to all products.`)
+    // The bulk "Update" only stages the policy in the grid's dataSet — commit to save it.
+    console.log(`Applied return policy "${policy.policyName}" to all products. Saving...`)
+    const policySaved = await commitGrid(await getListingsFrame(searchPage))
+    if (!policySaved.ok) {
+      throw new Error(`Saving return policy failed: ${policySaved.error}`)
+    }
+    console.log("Return policy saved.")
 
     let lastSku: string | undefined
     let listedCount = 0
