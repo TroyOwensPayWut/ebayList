@@ -51,6 +51,7 @@ export const buildConfig = (cliOptions: CliOptions) => {
   const productsUrl = `https://${SHOPIFY_STORE_DOMAIN}/admin/products`
   // Marketplace Connect eBay bulk grid — this is where the shopui.codisto.com iframe lives.
   const listingsUrl = "https://admin.shopify.com/store/paywut/apps/shopify-marketplace-connect/211238/ebay/bulk"
+  const motorsListingsUrl = "https://admin.shopify.com/store/paywut/apps/shopify-marketplace-connect/240617/ebay/bulk"
 
   return {
     ...cliOptions,
@@ -59,6 +60,7 @@ export const buildConfig = (cliOptions: CliOptions) => {
     profileDir,
     productsUrl,
     listingsUrl,
+    motorsListingsUrl,
     browserChannel: SHOPIFY_BROWSER_CHANNEL,
   } satisfies AppConfig
 }

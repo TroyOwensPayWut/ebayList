@@ -18,8 +18,9 @@ import { waitForFrameSettled } from "./pageLoad.js"
 import type { AppConfig } from "./types.js"
 
 // Per-product order (everything STAGES on the grid row; one commit at the end saves it all):
-// find product > search edit tab > google category lookup > get weight > stage shipping
-// > wait for user (category/skip/quit) > stage category > stage payment > stage enabled > save.
+// find product > google category lookup > get weight > search both edit tabs
+// > wait for user (marketplace + category / skip / quit)
+// > stage shipping > stage category > stage payment > stage enabled > save.
 export const runListingLoop = async (config: AppConfig) => {
   console.log("Launching authenticated browser...")
   const context = await launchAuthenticated(config)
@@ -31,9 +32,11 @@ export const runListingLoop = async (config: AppConfig) => {
     const shopifyPage = context.pages()[0] // reused each loop for the Shopify admin product search
     console.log(`Opening search tab at ${config.listingsUrl} (waiting for Marketplace Connect to load)...`)
     const searchPage = await openCodistoPage(context, config.listingsUrl) // finder scrolls here
-    console.log("Search tab ready. Opening edit tab...")
+    console.log("Search tab ready. Opening eBay edit tab...")
     const editPage = await openCodistoPage(context, config.listingsUrl) // SKU search + edit here
-    console.log("Edit tab ready.")
+    console.log("eBay edit tab ready. Opening eBay Motors edit tab...")
+    const motorsEditPage = await openCodistoPage(context, config.motorsListingsUrl) // Motors SKU search + edit
+    console.log("eBay Motors edit tab ready.")
     const googlePage = await context.newPage() // reused each loop for the category lookup
 
     console.log("Applying standard filters (Has images, quantity >= 1, payment policy not set)...")
@@ -73,17 +76,11 @@ export const runListingLoop = async (config: AppConfig) => {
 
       const { sku, title } = next
 
-      // 2. Search the edit tab (Codisto) for the product.
-      console.log(`Found ${sku} — ${title || "(no title)"}. Searching edit tab for ${sku}...`)
-      await waitForFrameSettled(editPage)
-      const editFrame = await getListingsFrame(editPage)
-      await searchForSku(editFrame, sku)
-
-      // 3. Category lookup on Google.
-      console.log("Looking up eBay category ID on Google...")
+      // 2. Category lookup on Google.
+      console.log(`Found ${sku} — ${title || "(no title)"}. Looking up eBay category ID on Google...`)
       await googlePage.goto(`https://www.google.com/search?q=${encodeURIComponent(`eBay category ID for ${title}`)}`)
 
-      // 4. Get the weight from Shopify (failures are non-fatal — set shipping manually).
+      // 3. Get the weight from Shopify (failures are non-fatal — set shipping manually).
       let weightLb: number | undefined
       const shopifySearch = await searchShopifyProductsBySku(shopifyPage, config.productsUrl, sku)
       if (!shopifySearch.ok) {
@@ -102,37 +99,45 @@ export const runListingLoop = async (config: AppConfig) => {
         }
       }
 
-      // 5. Stage the weight-tier shipping policy (saved by the final commit).
-      let staged = false
+      // 4. Search both edit tabs (eBay, then eBay Motors) so the user can see the product on both surfaces while deciding.
+      console.log(`Searching eBay and eBay Motors edit tabs for ${sku}...`)
+      await waitForFrameSettled(editPage)
+      const ebayEditFrame = await getListingsFrame(editPage)
+      await searchForSku(ebayEditFrame, sku)
+      await waitForFrameSettled(motorsEditPage)
+      const motorsEditFrame = await getListingsFrame(motorsEditPage)
+      await searchForSku(motorsEditFrame, sku)
+
+      // 5. Wait for the user (marketplace + category, skip, or quit). Nothing is staged yet.
+      const choice = await promptAction(rl, sku, title)
+
+      if (choice.action === "quit") {
+        console.log(`Quitting. Listed ${listedCount} product(s) this run.`)
+        break
+      }
+
+      if (choice.action === "skip") {
+        console.log(`Skipped ${sku}.`)
+        lastSku = sku
+        continue
+      }
+
+      // 6. Stage everything on the chosen marketplace's already-searched frame.
+      const marketplaceLabel = choice.marketplace === "motors" ? "eBay Motors" : "eBay"
+      const targetPage = choice.marketplace === "motors" ? motorsEditPage : editPage
+      const editFrame = choice.marketplace === "motors" ? motorsEditFrame : ebayEditFrame
+
+      // 7. Stage the weight-tier shipping policy (saved by the final commit; failure non-fatal).
       if (weightLb !== undefined) {
         const shipping = await stageShippingPolicy(editFrame, sku, weightLb)
         if (shipping.ok) {
-          staged = true
           console.log(`Weight: ${weightLb} lb → shipping policy "${shipping.policyName}" staged.`)
         } else {
           console.error(`Shipping policy failed for ${sku}: ${shipping.error}`)
         }
       }
 
-      // 6. Wait for the user.
-      const choice = await promptAction(rl, sku, title)
-
-      if (choice.action === "quit") {
-        // Staged-but-uncommitted changes die with the browser — no cleanup needed.
-        console.log(`Quitting. Listed ${listedCount} product(s) this run.`)
-        break
-      }
-
-      if (choice.action === "skip") {
-        if (staged) {
-          await discardStaged(editPage) // drop staged shipping so it can't ride along with the next product's save
-        }
-        console.log(`Skipped ${sku}.`)
-        lastSku = sku
-        continue
-      }
-
-      // 7–9. Stage category, payment policy, and enabled status on the same row.
+      // 8–10. Stage category, payment policy, and enabled status on the same row.
       console.log(`Staging category #${choice.category}, payment policy, and enable for ${sku}...`)
       const paymentPolicyId = await resolveImmediatePayPolicyId(editFrame)
       const stages: Array<[label: string, column: string, value: unknown]> = [
@@ -152,20 +157,20 @@ export const runListingLoop = async (config: AppConfig) => {
 
       if (stageError) {
         console.error(stageError)
-        await discardStaged(editPage)
+        await discardStaged(targetPage)
         lastSku = sku
         continue
       }
 
-      // 10. Save — one commit persists shipping + category + payment + enabled together.
+      // 11. Save — one commit persists shipping + category + payment + enabled together.
       console.log(`Saving ${sku}...`)
       const saved = await commitGrid(editFrame)
       if (saved.ok) {
         listedCount += 1
-        console.log(`Listed ${sku} under category #${choice.category}. (${listedCount} listed this run)`)
+        console.log(`Listed ${sku} on ${marketplaceLabel} under category #${choice.category}. (${listedCount} listed this run)`)
       } else {
         console.error(`Save failed for ${sku}: ${saved.error}`)
-        await discardStaged(editPage)
+        await discardStaged(targetPage)
       }
 
       lastSku = sku
@@ -222,7 +227,10 @@ const discardStaged = async (page: Page) => {
   await waitForFrameSettled(page)
 }
 
-type Action = { action: "category"; category: string } | { action: "skip" } | { action: "quit" }
+type Action =
+  | { action: "list"; marketplace: "ebay" | "motors"; category: string }
+  | { action: "skip" }
+  | { action: "quit" }
 
 /** Shows a numbered menu for a product and returns the chosen action. */
 const promptAction = async (
@@ -234,10 +242,10 @@ const promptAction = async (
 
   for (;;) {
     const answer = (
-      await rl.question(`${prefix}\n  1) Enter category number\n  2) Skip\n  3) Quit\nSelect 1-3: `)
+      await rl.question(`${prefix}\n  1) List on eBay\n  2) List on eBay Motors\n  3) Skip\n  4) Quit\nSelect 1-4: `)
     ).trim()
 
-    if (answer === "1") {
+    if (answer === "1" || answer === "2") {
       const category = (await rl.question("Enter eBay category number: ")).trim()
 
       if (!isValidCategoryId(category)) {
@@ -245,18 +253,18 @@ const promptAction = async (
         continue
       }
 
-      return { action: "category", category }
-    }
-
-    if (answer === "2") {
-      return { action: "skip" }
+      return { action: "list", marketplace: answer === "1" ? "ebay" : "motors", category }
     }
 
     if (answer === "3") {
+      return { action: "skip" }
+    }
+
+    if (answer === "4") {
       return { action: "quit" }
     }
 
-    console.log("Invalid selection; enter 1, 2, or 3.")
+    console.log("Invalid selection; enter 1, 2, 3, or 4.")
   }
 }
 

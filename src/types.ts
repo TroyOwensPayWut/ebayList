@@ -10,5 +10,6 @@ export type AppConfig = CliOptions & {
   profileDir: string
   productsUrl: string
   listingsUrl: string
+  motorsListingsUrl: string
   browserChannel: "chrome" | "msedge" | undefined
 }
