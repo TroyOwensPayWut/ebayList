@@ -40,6 +40,8 @@ export const pickNextAvailableSku = (
       continue
     }
 
+    if (row.title?.startsWith("Z@")) continue // Z@ prefix marks products to skip
+
     if (row.enabled === false && !row.hasError) {
       return { ok: true, sku: row.sku, title: row.title ?? "" }
     }
