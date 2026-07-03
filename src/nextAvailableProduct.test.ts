@@ -37,4 +37,11 @@ assert.deepEqual(pickNextAvailableSku(zRows), { ok: true, sku: "AB201", title: "
 // 6b. only Z@ rows available -> not-found error
 assert.deepEqual(pickNextAvailableSku([zRows[0]]), { ok: false, error: "No disabled product without errors was found" })
 
+// 6c. ZA@ title prefix -> skipped too
+const zaRows = [
+  { sku: "AB300", title: "ZA@ Hidden Widget", enabled: false, hasError: false }, // skip
+  { sku: "AB301", title: "Visible Widget", enabled: false, hasError: false },
+]
+assert.deepEqual(pickNextAvailableSku(zaRows), { ok: true, sku: "AB301", title: "Visible Widget" })
+
 console.log("nextAvailableProduct: all assertions passed")
