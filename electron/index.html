@@ -12,47 +12,66 @@
       display: flex;
       flex-direction: column;
       height: 100vh;
-      padding: 16px;
-      gap: 12px;
     }
-    header { display: flex; gap: 8px; align-items: center; }
+    /* Height must match HEADER_PX in main.js — web tabs render below this line. */
+    #header {
+      height: 124px;
+      flex: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 10px 12px 0;
+      border-bottom: 1px solid rgba(127, 127, 127, 0.35);
+    }
+    .row { display: flex; gap: 8px; align-items: center; min-height: 34px; }
     button {
       font: inherit;
-      padding: 8px 14px;
+      padding: 6px 12px;
       border-radius: 8px;
       border: 1px solid rgba(127, 127, 127, 0.4);
       background: transparent;
       cursor: pointer;
+      white-space: nowrap;
     }
     button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
-    button:disabled { opacity: 0.45; cursor: default; }
+    button:disabled { opacity: 0.4; cursor: default; }
     #status { margin-left: auto; opacity: 0.7; }
-    #promptCard {
-      border: 1px solid rgba(127, 127, 127, 0.4);
-      border-radius: 10px;
-      padding: 12px 14px;
-      display: none;
-      flex-direction: column;
-      gap: 10px;
+    #productLabel {
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      min-width: 60px;
+      opacity: 0.5;
     }
-    #promptCard.visible { display: flex; }
-    #productLabel { font-weight: 600; }
-    .promptRow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    #productLabel.active { opacity: 1; }
     #category {
       font: inherit;
-      padding: 7px 10px;
+      padding: 5px 10px;
       border-radius: 8px;
       border: 1px solid rgba(127, 127, 127, 0.4);
-      width: 160px;
+      width: 150px;
       background: transparent;
       color: inherit;
+    }
+    #tabbar { gap: 4px; min-height: 30px; }
+    #tabbar button {
+      border: none;
+      border-radius: 8px 8px 0 0;
+      padding: 5px 14px;
+      opacity: 0.65;
+    }
+    #tabbar button.active {
+      opacity: 1;
+      background: rgba(127, 127, 127, 0.2);
+      font-weight: 600;
     }
     #log {
       flex: 1;
       overflow-y: auto;
       margin: 0;
       padding: 10px 12px;
-      border-radius: 10px;
       background: rgba(127, 127, 127, 0.12);
       font: 12px/1.5 ui-monospace, Menlo, monospace;
       white-space: pre-wrap;
@@ -62,20 +81,22 @@
   </style>
 </head>
 <body>
-  <header>
-    <button id="authBtn">Log in to Shopify</button>
-    <button id="runBtn" class="primary">Start listing run</button>
-    <span id="status">Idle</span>
-  </header>
-
-  <div id="promptCard">
-    <div id="productLabel"></div>
-    <div class="promptRow">
-      <input id="category" inputmode="numeric" placeholder="eBay category number" />
-      <button id="listEbay" class="primary">List on eBay</button>
-      <button id="listMotors" class="primary">List on eBay Motors</button>
-      <button id="skip">Skip</button>
-      <button id="quit">Quit run</button>
+  <div id="header">
+    <div class="row">
+      <button id="authBtn">Log in to Shopify</button>
+      <button id="runBtn" class="primary">Start listing run</button>
+      <span id="status">Idle</span>
+    </div>
+    <div class="row">
+      <span id="productLabel">Waiting for a product…</span>
+      <input id="category" inputmode="numeric" placeholder="eBay category #" disabled />
+      <button id="listEbay" class="primary" disabled>List on eBay</button>
+      <button id="listMotors" class="primary" disabled>List on Motors</button>
+      <button id="skip" disabled>Skip</button>
+      <button id="quit" disabled>Quit run</button>
+    </div>
+    <div class="row" id="tabbar">
+      <button data-tab="log" class="active">Log</button>
     </div>
   </div>
 
@@ -84,8 +105,9 @@
   <script>
     const $ = (id) => document.getElementById(id)
     const log = $("log")
-    const promptCard = $("promptCard")
+    const tabbar = $("tabbar")
     const category = $("category")
+    const promptControls = ["category", "listEbay", "listMotors", "skip", "quit"].map($)
 
     const appendLog = ({ level, line }) => {
       const span = document.createElement("span")
@@ -95,26 +117,58 @@
       log.scrollTop = log.scrollHeight
     }
 
-    ebayList.onLog(appendLog)
+    // --- Tabs ---
+    const tabLabels = new Map() // id -> label
 
-    ebayList.onBusy((busy) => {
-      $("runBtn").disabled = busy
-      $("authBtn").disabled = busy
-      $("status").textContent = busy ? "Running…" : "Idle"
-      if (!busy) hidePrompt()
+    const highlightTab = (id) => {
+      for (const btn of tabbar.querySelectorAll("button")) {
+        btn.classList.toggle("active", btn.dataset.tab === String(id ?? "log"))
+      }
+    }
+
+    tabbar.addEventListener("click", (event) => {
+      const tab = event.target.dataset?.tab
+      if (!tab) return
+      ebayList.activateTab(tab === "log" ? null : Number(tab))
     })
+
+    ebayList.onTabCreated(({ id, label }) => {
+      tabLabels.set(id, label)
+      const btn = document.createElement("button")
+      btn.dataset.tab = String(id)
+      btn.textContent = label
+      tabbar.appendChild(btn)
+    })
+
+    ebayList.onTabsCleared(() => {
+      tabLabels.clear()
+      for (const btn of tabbar.querySelectorAll("button")) {
+        if (btn.dataset.tab !== "log") btn.remove()
+      }
+      highlightTab(null)
+    })
+
+    ebayList.onTabActive(highlightTab)
+
+    // --- Prompt ---
+    const setPromptActive = (active) => {
+      for (const el of promptControls) el.disabled = !active
+      $("productLabel").classList.toggle("active", active)
+      if (!active) $("productLabel").textContent = "Waiting for a product…"
+    }
 
     ebayList.onPrompt(({ sku, title }) => {
       $("productLabel").textContent = `${sku} — ${title || "(no title)"}`
       category.value = ""
-      promptCard.classList.add("visible")
+      setPromptActive(true)
+      // Show the category lookup while the user decides.
+      const googleId = [...tabLabels].find(([, label]) => label === "Google")?.[0]
+      if (googleId) ebayList.activateTab(googleId)
       category.focus()
     })
 
-    const hidePrompt = () => promptCard.classList.remove("visible")
-
     const respond = (action) => {
-      hidePrompt()
+      setPromptActive(false)
       ebayList.respond(action)
     }
 
@@ -127,6 +181,15 @@
       }
       respond({ action: "list", marketplace, category: value })
     }
+
+    // --- Wiring ---
+    ebayList.onLog(appendLog)
+    ebayList.onBusy((busy) => {
+      $("runBtn").disabled = busy
+      $("authBtn").disabled = busy
+      $("status").textContent = busy ? "Running…" : "Idle"
+      if (!busy) setPromptActive(false)
+    })
 
     $("listEbay").onclick = () => list("ebay")
     $("listMotors").onclick = () => list("motors")

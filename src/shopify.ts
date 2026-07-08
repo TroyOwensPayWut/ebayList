@@ -56,7 +56,7 @@ export const runAuthOnly = async (config: AppConfig) => {
   }
 }
 
-const ensureLoggedIn = async (page: Page, config: AppConfig) => {
+export const ensureLoggedIn = async (page: Page, config: AppConfig) => {
   await page.goto(config.productsUrl, { waitUntil: "domcontentloaded" })
 
   if (await isProductsPage(page)) {

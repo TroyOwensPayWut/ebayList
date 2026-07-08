@@ -1,13 +1,29 @@
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { app, BrowserWindow, ipcMain } from "electron"
+import { app, BrowserWindow, WebContentsView, ipcMain } from "electron"
+import { chromium } from "playwright"
 
 import { buildConfig } from "../dist/config.js"
 import { runListingLoop } from "../dist/run.js"
-import { runAuthOnly } from "../dist/shopify.js"
+import { ensureLoggedIn } from "../dist/shopify.js"
+import { TIMEOUT_MS } from "../dist/timeout.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// The automation drives the app's OWN Chromium over CDP, so the Shopify/Google pages
+// live as tabs inside this window instead of an external Chrome.
+// ponytail: fixed localhost port; make it configurable if it ever collides.
+const CDP_PORT = 9223
+app.commandLine.appendSwitch("remote-debugging-port", String(CDP_PORT))
+
+// Shopify/Google treat unusual user agents with suspicion — drop the Electron/app tokens.
+app.userAgentFallback = app.userAgentFallback
+  .replace(/\sElectron\/[\d.]+/, "")
+  .replace(/\sebayList\/[\d.]+/, "")
+
+// Must match the #header height in index.html.
+const HEADER_PX = 124
 
 let win = null
 
@@ -22,14 +38,111 @@ for (const level of ["log", "error"]) {
   }
 }
 
+// --- Embedded tabs ---------------------------------------------------------
+
+const tabs = new Map() // id -> WebContentsView
+let tabSeq = 0
+
+const viewBounds = () => {
+  const [width, height] = win.getContentSize()
+  return { x: 0, y: HEADER_PX, width, height: Math.max(0, height - HEADER_PX) }
+}
+
+const createTab = (label) => {
+  const id = ++tabSeq
+  const view = new WebContentsView()
+  view.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+  win.contentView.addChildView(view)
+  view.setBounds(viewBounds())
+  tabs.set(id, view)
+  send("tab-created", { id, label })
+  view.webContents.loadURL("about:blank")
+  activateTab(id)
+  return view
+}
+
+// id null = show the log pane (hide every web view).
+const activateTab = (id) => {
+  for (const [tabId, view] of tabs) view.setVisible(tabId === id)
+  send("tab-active", id)
+}
+
+const closeAllTabs = () => {
+  for (const view of tabs.values()) {
+    win.contentView.removeChildView(view)
+    view.webContents.close()
+  }
+  tabs.clear()
+  send("tabs-cleared", null)
+  activateTab(null)
+}
+
+ipcMain.on("activate-tab", (_event, id) => activateTab(id))
+
+// --- Browser session over CDP ----------------------------------------------
+
 const makeConfig = () =>
   buildConfig({
     authOnly: false,
     headless: false,
     slowMoMs: 250,
-    // Keep the Chrome profile in the app's own data folder (cwd is "/" in a packaged app).
+    // Unused by the embedded session (Electron's default session persists login
+    // in userData itself) but the config type wants it.
     profileDir: path.join(app.getPath("userData"), "profile"),
   })
+
+let session = null
+
+const getSession = async (config) => {
+  if (session) return session
+
+  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`, { slowMo: config.slowMoMs })
+  const context = browser.contexts()[0] // Electron's default session (persistent)
+  context.setDefaultTimeout(TIMEOUT_MS)
+  context.setDefaultNavigationTimeout(TIMEOUT_MS)
+  await context.addInitScript("window.__name = function(fn) { return fn; };")
+
+  // Tabs are created by Electron, then matched to the new Playwright page by
+  // diffing context.pages() — serialized so two tabs can't race the diff.
+  let queue = Promise.resolve()
+  const newPage = (label) => {
+    const result = queue.then(async () => {
+      const before = new Set(context.pages())
+      createTab(label ?? "Tab")
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const page = context.pages().find((p) => !before.has(p))
+        if (page) return page
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      throw new Error("Timed out waiting for the new embedded tab to appear over CDP")
+    })
+    queue = result.catch(() => {})
+    return result
+  }
+
+  session = {
+    shopifyPage: null,
+    newPage,
+    close: async () => {
+      session = null
+      await browser.close().catch(() => {}) // detaches CDP without killing Electron
+      closeAllTabs()
+    },
+  }
+  return session
+}
+
+// Session with a logged-in Shopify tab — injected into runListingLoop, reused across runs.
+const openElectronSession = async (config) => {
+  const s = await getSession(config)
+  if (!s.shopifyPage || s.shopifyPage.isClosed()) {
+    s.shopifyPage = await s.newPage("Shopify")
+  }
+  await ensureLoggedIn(s.shopifyPage, config) // navigates to the products page; waits for manual login/2FA if needed
+  return s
+}
+
+// --- UI actions -------------------------------------------------------------
 
 // The run loop asks what to do per product; forward to the renderer and wait for the click.
 const promptUser = (sku, title) =>
@@ -53,23 +166,46 @@ const runTask = async (task) => {
   }
 }
 
-ipcMain.on("start-run", () => runTask(() => runListingLoop(makeConfig(), promptUser)))
+ipcMain.on("start-run", () => runTask(() => runListingLoop(makeConfig(), promptUser, openElectronSession)))
 ipcMain.on("start-auth", () =>
   runTask(async () => {
-    await runAuthOnly(makeConfig())
+    await openElectronSession(makeConfig())
     console.log("Shopify session saved. You can start a listing run.")
   }),
 )
 
+// --- Startup ----------------------------------------------------------------
+
+// Self-check for the CDP plumbing (no Shopify needed): EBAYLIST_SMOKE=1 pnpm ui
+const runSmokeCheck = async () => {
+  try {
+    const s = await getSession(makeConfig())
+    const page = await s.newPage("Smoke")
+    await page.goto("https://example.com", { waitUntil: "domcontentloaded" })
+    const title = await page.title()
+    if (!/example/i.test(title)) throw new Error(`Unexpected title: ${title}`)
+    await s.close()
+    console.log(`SMOKE_OK title="${title}"`)
+    app.exit(0)
+  } catch (error) {
+    console.error("SMOKE_FAIL", error)
+    app.exit(1)
+  }
+}
+
 app.whenReady().then(() => {
   win = new BrowserWindow({
-    width: 760,
-    height: 680,
+    width: 1440,
+    height: 960,
     title: "ebayList",
     webPreferences: { preload: path.join(__dirname, "preload.cjs") },
   })
+  win.on("resize", () => {
+    for (const view of tabs.values()) view.setBounds(viewBounds())
+  })
   win.loadFile(path.join(__dirname, "index.html"))
+  if (process.env.EBAYLIST_SMOKE) runSmokeCheck()
 })
 
-// ponytail: quitting mid-run just kills the process; Chrome closes with it, staged-only changes are dropped.
+// ponytail: quitting mid-run just kills the process; staged-only changes are dropped.
 app.on("window-all-closed", () => app.quit())

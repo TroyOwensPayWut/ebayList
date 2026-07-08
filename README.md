@@ -8,14 +8,14 @@ Download the `.dmg`, drag **ebayList** to Applications, and open it.
 
 The app is not notarized by Apple, so the first launch is blocked: open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to ebayList. This is needed once.
 
-In the app:
+In the app (all pages open as tabs inside the window — no separate browser):
 
-1. Click **Log in to Shopify** the first time (completes login + 2FA in a Chrome window; the session is remembered).
-2. Click **Start listing run**. For each product, enter the eBay category number and choose **List on eBay**, **List on eBay Motors**, **Skip**, or **Quit run**.
+1. Click **Log in to Shopify** the first time (complete login + 2FA in the Shopify tab; the session is remembered).
+2. Click **Start listing run**. For each product the Google tab shows the category lookup; enter the eBay category number and choose **List on eBay**, **List on Motors**, **Skip**, or **Quit run**. The grid tabs stay editable before you choose.
 
-Google Chrome must be installed.
+Build the `.dmg` with `pnpm dist:mac` (output in `release/`). Run the app from source with `pnpm ui`. `EBAYLIST_SMOKE=1 pnpm ui` self-checks the embedded-tab automation without Shopify.
 
-Build the `.dmg` with `pnpm dist:mac` (output in `release/`). Run the app from source with `pnpm ui`.
+The CLI (`pnpm start`) still uses an external Google Chrome window.
 
 ## For non-terminal users (from source)
 

@@ -1,7 +1,7 @@
 import readline from "node:readline/promises"
 import { stdin as input, stdout as output } from "node:process"
 
-import type { BrowserContext, Frame, Page } from "playwright"
+import type { Frame, Page } from "playwright"
 
 import { applyStandardFilters } from "./filters.js"
 import { STATUS_ENABLED } from "./listings.js"
@@ -14,7 +14,7 @@ import { discardGrid } from "./discard.js"
 import { openFirstShopifyProduct, searchShopifyProductsBySku } from "./shopifyProducts.js"
 import { extractProductWeightLb } from "./productWeight.js"
 import { resolveShippingPolicyId, shippingPolicyForWeightLb } from "./shippingPolicies.js"
-import { launchAuthenticated } from "./shopify.js"
+import { launchChromeSession, type BrowserSession, type OpenSession } from "./session.js"
 import { waitForFrameSettled } from "./pageLoad.js"
 import type { AppConfig } from "./types.js"
 
@@ -24,22 +24,26 @@ import type { AppConfig } from "./types.js"
 // > search both edit tabs + stage defaults (shipping, payment, enabled) on each
 // > wait for user (marketplace + category / skip / quit)
 // > stage category on chosen grid > save chosen > discard the other grid's staged defaults.
-export const runListingLoop = async (config: AppConfig, promptUser: PromptUser = promptViaTerminal) => {
+export const runListingLoop = async (
+  config: AppConfig,
+  promptUser: PromptUser = promptViaTerminal,
+  openSession: OpenSession = launchChromeSession,
+) => {
   console.log("Launching authenticated browser...")
-  const context = await launchAuthenticated(config)
+  const session = await openSession(config)
   console.log("Browser ready.")
 
   try {
     // The auth check already left the first tab on the Shopify products page — reuse it as the product search tab.
-    const shopifyPage = context.pages()[0] // reused each loop for the Shopify admin product search
+    const shopifyPage = session.shopifyPage // reused each loop for the Shopify admin product search
     console.log(`Opening search tab at ${config.listingsUrl} (waiting for Marketplace Connect to load)...`)
-    const searchPage = await openCodistoPage(context, config.listingsUrl) // finder scrolls here
+    const searchPage = await openCodistoPage(session, config.listingsUrl, "Search") // finder scrolls here
     console.log("Search tab ready. Opening eBay edit tab...")
-    const editPage = await openCodistoPage(context, config.listingsUrl) // SKU search + edit here
+    const editPage = await openCodistoPage(session, config.listingsUrl, "eBay edit") // SKU search + edit here
     console.log("eBay edit tab ready. Opening eBay Motors edit tab...")
-    const motorsEditPage = await openCodistoPage(context, config.motorsListingsUrl) // Motors SKU search + edit
+    const motorsEditPage = await openCodistoPage(session, config.motorsListingsUrl, "Motors edit") // Motors SKU search + edit
     console.log("eBay Motors edit tab ready.")
-    const googlePage = await context.newPage() // reused each loop for the category lookup
+    const googlePage = await session.newPage("Google") // reused each loop for the category lookup
 
     console.log("Applying standard filters (Has images, quantity >= 1, payment policy not set)...")
     await waitForFrameSettled(searchPage)
@@ -147,7 +151,7 @@ export const runListingLoop = async (config: AppConfig, promptUser: PromptUser =
       const choice = await promptUser(sku, title)
 
       if (choice.action === "quit") {
-        // context.close() drops all staged (client-side) changes — no discard needed.
+        // session.close() drops all staged (client-side) changes — no discard needed.
         console.log(`Quitting. Listed ${listedCount} product(s) this run.`)
         break
       }
@@ -200,7 +204,7 @@ export const runListingLoop = async (config: AppConfig, promptUser: PromptUser =
     )
   } finally {
     console.log("Closing browser...")
-    await context.close()
+    await session.close()
   }
 }
 
@@ -325,8 +329,8 @@ const promptViaTerminal: PromptUser = async (sku, title) => {
   }
 }
 
-const openCodistoPage = async (context: BrowserContext, productsUrl: string): Promise<Page> => {
-  const page = await context.newPage()
+const openCodistoPage = async (session: BrowserSession, productsUrl: string, label: string): Promise<Page> => {
+  const page = await session.newPage(label)
   await page.goto(productsUrl, { waitUntil: "domcontentloaded" })
   await page.locator("iframe").first().waitFor({ state: "attached" })
   return page
