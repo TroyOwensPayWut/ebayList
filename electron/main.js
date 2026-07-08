@@ -205,6 +205,10 @@ app.whenReady().then(() => {
   })
   win.loadFile(path.join(__dirname, "index.html"))
   if (process.env.EBAYLIST_SMOKE) runSmokeCheck()
+  // Throwaway module harness (electron/tryModules.js): EBAYLIST_MODULE_TEST=1 pnpm ui
+  if (process.env.EBAYLIST_MODULE_TEST) {
+    import("./tryModules.js").then((m) => m.runModuleTests({ openSession: openElectronSession, makeConfig, app }))
+  }
 })
 
 // ponytail: quitting mid-run just kills the process; staged-only changes are dropped.
