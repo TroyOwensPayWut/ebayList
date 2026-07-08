@@ -82,7 +82,7 @@ const main = async () => {
     await waitForFrameSettled(page)
     const frame = await getListingsFrame(page)
     // Give the virtualized grid a moment to load rows.
-    await frame.waitForSelector("#ebaytable", { timeout: 30000 })
+    await frame.waitForSelector("#ebaytable")
     await waitForFrameSettled(page)
 
     console.log("Controls BEFORE staging:")

@@ -1,6 +1,7 @@
 import type { Frame, Page } from "playwright"
 
 import { findCodistoFrame } from "./pageLoad.js"
+import { TIMEOUT_MS } from "./timeout.js"
 
 type ExtractedRow = {
   sku: string
@@ -61,7 +62,7 @@ export const pickNextAvailableSku = (
 export const findNextAvailableEbaySku = async (page: Page, startSku?: string): Promise<FindNextAvailableEbaySkuResult> => {
   try {
     const frame = await getListingsFrame(page)
-    await frame.getByPlaceholder("Search items", { exact: true }).waitFor({ state: "visible", timeout: 30000 })
+    await frame.getByPlaceholder("Search items", { exact: true }).waitFor({ state: "visible" })
 
     const seenSkus = new Set<string>()
     const allRows: ExtractedRow[] = []
@@ -112,7 +113,7 @@ export const checkSkuListable = async (page: Page, sku: string): Promise<FindNex
   try {
     const frame = await getListingsFrame(page)
     const wanted = sku.trim().toLowerCase()
-    const deadline = Date.now() + 15000
+    const deadline = Date.now() + TIMEOUT_MS
 
     for (;;) {
       const row = (await extractVisibleRows(frame)).find((candidate) => candidate.sku.toLowerCase() === wanted)

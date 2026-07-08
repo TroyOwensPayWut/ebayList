@@ -2,6 +2,7 @@ import fs from "node:fs/promises"
 
 import { chromium, type BrowserContext, type Page } from "playwright"
 
+import { TIMEOUT_MS } from "./timeout.js"
 import type { AppConfig } from "./types.js"
 
 // Launch the persistent Chromium profile, ensure Shopify is logged in, and return
@@ -18,6 +19,8 @@ export const launchAuthenticated = async (config: AppConfig): Promise<BrowserCon
     chromiumSandbox: true,
     args: ["--disable-blink-features=AutomationControlled", "--test-type"],
   })
+  context.setDefaultTimeout(TIMEOUT_MS)
+  context.setDefaultNavigationTimeout(TIMEOUT_MS)
 
   try {
     await context.addInitScript("window.__name = function(fn) { return fn; };")
@@ -41,6 +44,8 @@ export const runAuthOnly = async (config: AppConfig) => {
     chromiumSandbox: true,
     args: ["--disable-blink-features=AutomationControlled", "--test-type"],
   })
+  context.setDefaultTimeout(TIMEOUT_MS)
+  context.setDefaultNavigationTimeout(TIMEOUT_MS)
 
   try {
     await context.addInitScript("window.__name = function(fn) { return fn; };")

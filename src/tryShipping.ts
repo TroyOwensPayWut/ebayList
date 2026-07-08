@@ -38,7 +38,7 @@ const main = async () => {
 
     const gridPage = await context.newPage()
     await gridPage.goto(config.listingsUrl, { waitUntil: "domcontentloaded" })
-    await gridPage.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
+    await gridPage.locator("iframe").first().waitFor({ state: "attached" })
     await waitForFrameSettled(gridPage)
 
     console.log(`Setting shipping policy for ${sku} (commit: ${commit})...`)

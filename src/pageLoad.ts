@@ -1,5 +1,7 @@
 import type { Frame, Page } from "playwright"
 
+import { TIMEOUT_MS } from "./timeout.js"
+
 // Loader classes captured live from the Codisto frame (src/inspectLoading probe).
 // Note: the frame exposes NO aria-busy / progressbar / spinner — only these skeletons
 // and the .dataset-loading grid state, so we key off the real DOM, not generic guesses.
@@ -13,7 +15,7 @@ type SettleOptions = { timeoutMs?: number; floorMs?: number; pollMs?: number; cl
 // probe reports "not loading" for `clearNeeded` consecutive polls. Exported for tests.
 export const waitUntilIdle = async (
   isLoading: () => Promise<boolean>,
-  { timeoutMs = 30000, floorMs = 250, pollMs = 250, clearNeeded = 2 }: SettleOptions = {},
+  { timeoutMs = TIMEOUT_MS, floorMs = 250, pollMs = 250, clearNeeded = 2 }: SettleOptions = {},
 ) => {
   await wait(floorMs)
   const deadline = Date.now() + timeoutMs
@@ -50,8 +52,8 @@ export const waitForFrameLoaders = async (frame: Frame, options: SettleOptions =
 
 // The iframe can attach before its URL resolves to the Codisto app — poll for it
 // instead of failing on the first look.
-export const findCodistoFrame = async (page: Page, timeoutMs = 10000): Promise<Frame> => {
-  await page.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
+export const findCodistoFrame = async (page: Page, timeoutMs = TIMEOUT_MS): Promise<Frame> => {
+  await page.locator("iframe").first().waitFor({ state: "attached" })
   const deadline = Date.now() + timeoutMs
 
   for (;;) {

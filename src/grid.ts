@@ -1,6 +1,7 @@
 import type { Frame, Page } from "playwright"
 
 import { findCodistoFrame, waitForFrameLoaders } from "./pageLoad.js"
+import { TIMEOUT_MS } from "./timeout.js"
 
 // Shared plumbing for the Codisto bulk grid (id="ebaytable") — a virtualized
 // datagrid inside the shopui.codisto.com iframe. Saving works like the app's own
@@ -9,12 +10,12 @@ import { findCodistoFrame, waitForFrameLoaders } from "./pageLoad.js"
 // (they ride along with the next commit), so writers here go straight to the data
 // layer instead.
 
-export const getListingsFrame = (page: Page): Promise<Frame> => findCodistoFrame(page, 30000)
+export const getListingsFrame = (page: Page): Promise<Frame> => findCodistoFrame(page)
 
 // Filter the grid down to the SKU so its row is loaded into the (virtualized) dataSet.
 export const searchForSku = async (frame: Frame, sku: string) => {
   const search = frame.getByPlaceholder("Search items", { exact: true })
-  await search.waitFor({ state: "visible", timeout: 30000 })
+  await search.waitFor({ state: "visible" })
   await search.fill(sku)
   await search.press("Enter")
   await waitForFrameLoaders(frame)
@@ -28,7 +29,7 @@ export type LocateResult =
 
 // Poll the grid's dataSet until the SKU's row is loaded (search results stream in).
 export const findRowIndex = async (frame: Frame, sku: string): Promise<LocateResult> => {
-  const deadline = Date.now() + 15000
+  const deadline = Date.now() + TIMEOUT_MS
   let last: LocateResult = { status: "notfound" }
 
   while (Date.now() < deadline) {
@@ -128,7 +129,7 @@ export const commitGrid = async (frame: Frame): Promise<{ ok: true } | { ok: fal
 
 // commit() clears dataSet dirty on server "ok"/"warning"; a rejected change leaves it dirty.
 export const waitForCommit = async (frame: Frame): Promise<{ ok: true } | { ok: false; error: string }> => {
-  const deadline = Date.now() + 30000
+  const deadline = Date.now() + TIMEOUT_MS
 
   while (Date.now() < deadline) {
     const dirty = await frame.evaluate(() => {

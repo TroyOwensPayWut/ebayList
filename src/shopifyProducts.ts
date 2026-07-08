@@ -1,5 +1,7 @@
 import type { Page } from "playwright"
 
+import { TIMEOUT_MS } from "./timeout.js"
+
 // Searches the Shopify admin products page for a SKU by editing the URL,
 // the same way amzList does (products index honors ?query=).
 export const searchShopifyProductsBySku = async (
@@ -25,7 +27,7 @@ export const pickFirstProductHref = (hrefs: string[]): string | undefined =>
 // Call after searchShopifyProductsBySku; polls because results render client-side.
 export const openFirstShopifyProduct = async (
   page: Page,
-  timeoutMs = 15000,
+  timeoutMs = TIMEOUT_MS,
 ): Promise<{ ok: true } | { ok: false; error: string }> => {
   try {
     const deadline = Date.now() + timeoutMs

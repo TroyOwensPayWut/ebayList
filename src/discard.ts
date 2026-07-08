@@ -1,6 +1,7 @@
 import type { Frame, Page } from "playwright"
 
 import { findCodistoFrame } from "./pageLoad.js"
+import { TIMEOUT_MS } from "./timeout.js"
 
 // Discards ALL staged (uncommitted) Codisto grid changes by clicking the
 // "Discard" button in Shopify's contextual save bar (top-level page, next to
@@ -16,7 +17,7 @@ export const discardGrid = async (page: Page): Promise<{ ok: true } | { ok: fals
   // Class names in the save bar are hash-suffixed — match by visible text.
   const discardButton = page.getByRole("button", { name: "Discard", exact: true }).first()
   try {
-    await discardButton.waitFor({ state: "visible", timeout: 10000 })
+    await discardButton.waitFor({ state: "visible" })
   } catch {
     return { ok: false, error: "Discard button not found while grid was dirty" }
   }
@@ -25,7 +26,7 @@ export const discardGrid = async (page: Page): Promise<{ ok: true } | { ok: fals
   // Shopify sometimes confirms with a "Discard all unsaved changes?" dialog.
   const confirmButton = page.getByRole("button", { name: /discard changes/i }).first()
 
-  const deadline = Date.now() + 15000
+  const deadline = Date.now() + TIMEOUT_MS
   while (Date.now() < deadline) {
     if ((await isDirty(frame)) === false) return { ok: true }
     if (await confirmButton.isVisible().catch(() => false)) {

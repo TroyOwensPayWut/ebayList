@@ -1,5 +1,7 @@
 import type { Page } from "playwright"
 
+import { TIMEOUT_MS } from "./timeout.js"
+
 // Shopify's unit select shows lb/oz/kg/g but has used spelled-out values too.
 const LB_PER_UNIT: Record<string, number> = {
   lb: 1,
@@ -36,7 +38,7 @@ export type ExtractWeightResult =
  */
 export const extractProductWeightLb = async (
   page: Page,
-  timeoutMs = 10000,
+  timeoutMs = TIMEOUT_MS,
 ): Promise<ExtractWeightResult> => {
   try {
     // Shipping card ids observed live: input#ShippingCardWeight (label "Product weight")

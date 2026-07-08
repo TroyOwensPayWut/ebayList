@@ -18,7 +18,7 @@ const LABEL = "Returns Accepted,Buyer,30 Days,Money Back,Int"
 
 const openGrid = async (page: Page, url: string) => {
   await page.goto(url, { waitUntil: "domcontentloaded" })
-  await page.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
+  await page.locator("iframe").first().waitFor({ state: "attached" })
   await waitForFrameSettled(page)
   return getListingsFrame(page)
 }

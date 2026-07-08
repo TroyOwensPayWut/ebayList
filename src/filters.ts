@@ -150,9 +150,9 @@ const openColumnFilterPopover = async (frame: Frame, column: string) => {
   } catch {
     await glyph.dispatchEvent("click") // bypass viewport check if the column still isn't fully on-screen
   }
-  await frame.getByPlaceholder("Search selections").first().waitFor({ state: "visible", timeout: 15000 })
+  await frame.getByPlaceholder("Search selections").first().waitFor({ state: "visible" })
   // Options load lazily behind a loading-skeleton; wait for a real option (skeleton
   // placeholders lack the apply-filter-check class) before reading/toggling.
-  await frame.locator("input.apply-filter-check:visible").first().waitFor({ state: "visible", timeout: 15000 })
+  await frame.locator("input.apply-filter-check:visible").first().waitFor({ state: "visible" })
   await frame.waitForTimeout(300)
 }

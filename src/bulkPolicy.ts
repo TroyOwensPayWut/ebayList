@@ -54,7 +54,7 @@ const getListingsFrame = findCodistoFrame
 // dead end. The grid instance ($(#ebaytable).data("codisto.grid")) exposes a real selection
 // API — selectAll()/selectCount — so select through the data layer, like grid.ts does.
 const selectAllProducts = async (frame: Frame) => {
-  await frame.locator("#ebaytable").waitFor({ state: "attached", timeout: 30000 })
+  await frame.locator("#ebaytable").waitFor({ state: "attached" })
 
   const selected = await frame.evaluate(() => {
     const w = window as unknown as { $?: (s: unknown) => { data: (k: string) => unknown } }
@@ -78,7 +78,7 @@ const selectAllProducts = async (frame: Frame) => {
   }
 
   // The grid flags an active bulk-edit selection on its root element.
-  await frame.locator(".codisto-grid.multi-edit-active").first().waitFor({ state: "attached", timeout: 15000 })
+  await frame.locator(".codisto-grid.multi-edit-active").first().waitFor({ state: "attached" })
 }
 
 // The bulk-edit row's policy <select> needs real events — Playwright's selectOption fires
@@ -100,7 +100,7 @@ const chooseBulkPolicy = async (frame: Frame, selectId: string, policyName: stri
 
   // The "Update" button (button.update-bulk-edit) is overlaid by a
   // <span class="bulk-active-text"> that intercepts Playwright clicks — click it natively.
-  await frame.locator("button.update-bulk-edit").first().waitFor({ state: "attached", timeout: 15000 })
+  await frame.locator("button.update-bulk-edit").first().waitFor({ state: "attached" })
 
   if (!commit) {
     return // selection is only staged; caller discards it (e.g. by reloading)

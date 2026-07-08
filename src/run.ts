@@ -267,7 +267,7 @@ const discardStaged = async (page: Page) => {
   if (discarded.ok) return
   console.error(`Discard button failed (${discarded.error}); reloading to drop staged changes.`)
   await page.reload({ waitUntil: "domcontentloaded" })
-  await page.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
+  await page.locator("iframe").first().waitFor({ state: "attached" })
   await waitForFrameSettled(page)
 }
 
@@ -315,6 +315,6 @@ const promptAction = async (
 const openCodistoPage = async (context: BrowserContext, productsUrl: string): Promise<Page> => {
   const page = await context.newPage()
   await page.goto(productsUrl, { waitUntil: "domcontentloaded" })
-  await page.locator("iframe").first().waitFor({ state: "attached", timeout: 30000 })
+  await page.locator("iframe").first().waitFor({ state: "attached" })
   return page
 }
