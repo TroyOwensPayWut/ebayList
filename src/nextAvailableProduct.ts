@@ -20,6 +20,8 @@ export type FindNextAvailableEbaySkuResult =
   | {
       ok: false
       error: string
+      /** Set when the SKU's row was found but is unlistable — absent on transient failures (not found / timeout). */
+      reason?: "enabled" | "error-badge"
     }
 
 // Pure gating logic over the ordered list of rows seen so far. When startSku is
@@ -121,7 +123,9 @@ export const checkSkuListable = async (page: Page, sku: string): Promise<FindNex
         if (row.enabled === false && !row.hasError) {
           return { ok: true, sku: row.sku, title: row.title ?? "" }
         }
-        return { ok: false, error: row.hasError ? "row has an error badge" : "already enabled" }
+        return row.hasError
+          ? { ok: false, error: "row has an error badge", reason: "error-badge" }
+          : { ok: false, error: "already enabled", reason: "enabled" }
       }
       if (Date.now() >= deadline) {
         return { ok: false, error: `SKU ${sku} was not found in the grid` }

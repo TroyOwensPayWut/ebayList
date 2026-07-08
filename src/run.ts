@@ -7,7 +7,7 @@ import { applyStandardFilters } from "./filters.js"
 import { STATUS_ENABLED } from "./listings.js"
 import { isValidCategoryId } from "./categories.js"
 import { applyReturnPolicyToAllProducts, resolveMotorsReturnPolicyId } from "./returnPolicies.js"
-import { resolveImmediatePayPolicyId } from "./paymentPolicies.js"
+import { resolveImmediatePayPolicyId, setPaymentPolicy } from "./paymentPolicies.js"
 import { checkSkuListable, findNextAvailableEbaySku } from "./nextAvailableProduct.js"
 import { commitGrid, findRowIndex, getListingsFrame, searchForSku, setAndCommit } from "./grid.js"
 import { discardGrid } from "./discard.js"
@@ -90,6 +90,17 @@ export const runListingLoop = async (config: AppConfig) => {
       const motorsCheck = await checkSkuListable(motorsEditPage, sku)
       if (!motorsCheck.ok) {
         console.log(`Skipping ${sku} — not listable on eBay Motors (${motorsCheck.error}).`)
+        // Unlistable (enabled on Motors or errored): set the immediate-pay payment policy on
+        // the eBay grid so the "payment policy not set" filter hides it in future runs.
+        // Transient failures (row not found / timeout) are left unmarked.
+        if (motorsCheck.reason) {
+          console.log(`Setting payment policy on ${sku} so future scans filter it out...`)
+          await waitForFrameSettled(editPage)
+          const marked = await setPaymentPolicy(editPage, sku)
+          if (!marked.ok) {
+            console.error(`Could not set payment policy for ${sku}: ${marked.error}`)
+          }
+        }
         lastSku = sku
         continue
       }
