@@ -6,7 +6,7 @@ import type { BrowserContext, Frame, Page } from "playwright"
 import { applyStandardFilters } from "./filters.js"
 import { STATUS_ENABLED } from "./listings.js"
 import { isValidCategoryId } from "./categories.js"
-import { applyReturnPolicyToAllProducts, resolveReturnPolicyId } from "./returnPolicies.js"
+import { applyReturnPolicyToAllProducts, resolveMotorsReturnPolicyId } from "./returnPolicies.js"
 import { resolveImmediatePayPolicyId } from "./paymentPolicies.js"
 import { checkSkuListable, findNextAvailableEbaySku } from "./nextAvailableProduct.js"
 import { commitGrid, findRowIndex, getListingsFrame, searchForSku, setAndCommit } from "./grid.js"
@@ -127,7 +127,7 @@ export const runListingLoop = async (config: AppConfig) => {
       await stageDefaults(ebayEditFrame, "eBay", sku, weightLb)
       await stageDefaults(motorsEditFrame, "eBay Motors", sku, weightLb)
       // Motors only: the regular eBay grid already got the bulk return-policy apply at startup.
-      const returnPolicy = await stageRowValue(motorsEditFrame, sku, "returnpolicyid", await resolveReturnPolicyId(motorsEditFrame))
+      const returnPolicy = await stageRowValue(motorsEditFrame, sku, "returnpolicyid", await resolveMotorsReturnPolicyId(motorsEditFrame))
       if (!returnPolicy.ok) {
         console.error(`eBay Motors: Return policy failed for ${sku}: ${returnPolicy.error}`)
       }
