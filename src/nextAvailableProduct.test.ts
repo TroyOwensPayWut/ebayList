@@ -27,15 +27,12 @@ assert.deepEqual(pickNextAvailableSku([], "AB101"), { ok: false, error: "No prod
 // 5. start found but nothing available after it
 assert.deepEqual(pickNextAvailableSku(rows, "AB103"), { ok: false, error: "No disabled product without errors was found" })
 
-// 6. Z@ title prefix -> skipped even if otherwise available
+// 6. Z@ title prefix -> no longer skipped
 const zRows = [
-  { sku: "AB200", title: "Z@ Hidden Widget", enabled: false, hasError: false }, // skip
+  { sku: "AB200", title: "Z@ Widget", enabled: false, hasError: false },
   { sku: "AB201", title: "Visible Widget", enabled: false, hasError: false },
 ]
-assert.deepEqual(pickNextAvailableSku(zRows), { ok: true, sku: "AB201", title: "Visible Widget" })
-
-// 6b. only Z@ rows available -> not-found error
-assert.deepEqual(pickNextAvailableSku([zRows[0]]), { ok: false, error: "No disabled product without errors was found" })
+assert.deepEqual(pickNextAvailableSku(zRows), { ok: true, sku: "AB200", title: "Z@ Widget" })
 
 // 6c. ZA@ title prefix -> skipped too
 const zaRows = [
