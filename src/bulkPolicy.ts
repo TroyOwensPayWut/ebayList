@@ -1,6 +1,7 @@
 import type { Frame, Page } from "playwright"
 
 import { findCodistoFrame, waitForFrameLoaders } from "./pageLoad.js"
+import { TIMEOUT_MS } from "./timeout.js"
 
 // Shared bulk-edit-row policy applier for the Codisto grid: select all products,
 // pick a policy in the bulk-edit <select>, click Update.
@@ -55,6 +56,23 @@ const getListingsFrame = findCodistoFrame
 // API — selectAll()/selectCount — so select through the data layer, like grid.ts does.
 const selectAllProducts = async (frame: Frame) => {
   await frame.locator("#ebaytable").waitFor({ state: "attached" })
+
+  // The dataSet populates async AFTER the loading skeletons clear (seen live in the
+  // Electron embedded browser) — selectAll() on a still-loading grid selects 0 rows.
+  // Poll for rows first, like findRowIndex does; a genuinely empty grid still falls
+  // through to the "No products were selected" error below after the timeout.
+  const deadline = Date.now() + TIMEOUT_MS
+  for (;;) {
+    const rowCount = await frame.evaluate(() => {
+      const w = window as unknown as { $?: (s: unknown) => { data: (k: string) => unknown } }
+      const gridEl = document.getElementById("ebaytable")
+      if (!w.$ || !gridEl) return 0
+      const inst = w.$(gridEl).data("codisto.grid") as { dataSet?: { data?: unknown[] } } | undefined
+      return inst?.dataSet?.data?.length ?? 0
+    })
+    if (rowCount > 0 || Date.now() >= deadline) break
+    await frame.waitForTimeout(500)
+  }
 
   const selected = await frame.evaluate(() => {
     const w = window as unknown as { $?: (s: unknown) => { data: (k: string) => unknown } }
