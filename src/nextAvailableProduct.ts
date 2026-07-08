@@ -69,6 +69,7 @@ export const findNextAvailableEbaySku = async (page: Page, startSku?: string): P
     const seenSkus = new Set<string>()
     const allRows: ExtractedRow[] = []
     let previousLastSku = ""
+    const emptyGridDeadline = Date.now() + TIMEOUT_MS
 
     for (let pass = 0; pass < 500; pass += 1) {
       const rows = await extractVisibleRows(frame)
@@ -90,6 +91,12 @@ export const findNextAvailableEbaySku = async (page: Page, startSku?: string): P
 
       // Grid can no longer scroll — the accumulated result (error) is final.
       if (!lastSku || lastSku === previousLastSku) {
+        // Zero rows right after a page/filter load can just be the dataSet still
+        // populating (loaders clear first) — keep polling before concluding "no rows".
+        if (allRows.length === 0 && Date.now() < emptyGridDeadline) {
+          await frame.page().waitForTimeout(500)
+          continue
+        }
         return result
       }
 
