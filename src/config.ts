@@ -47,7 +47,7 @@ export const parseCliOptions = () => {
 }
 
 export const buildConfig = (cliOptions: CliOptions) => {
-  const profileDir = path.resolve(process.cwd(), ".auth", "profile")
+  const profileDir = cliOptions.profileDir ?? path.resolve(process.cwd(), ".auth", "profile")
   const productsUrl = `https://${SHOPIFY_STORE_DOMAIN}/admin/products`
   // Marketplace Connect eBay bulk grid — this is where the shopui.codisto.com iframe lives.
   const listingsUrl = "https://admin.shopify.com/store/paywut/apps/shopify-marketplace-connect/211238/ebay/bulk"

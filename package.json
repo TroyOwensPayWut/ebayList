@@ -1,19 +1,51 @@
 {
   "name": "ebay-list-cli",
+  "productName": "ebayList",
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "electron/main.js",
   "scripts": {
     "auth": "tsx src/index.ts --auth-only",
     "start": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "ui": "tsc && electron .",
+    "dist:mac": "tsc && electron-builder --mac"
   },
   "dependencies": {
     "playwright": "^1.53.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.10",
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
+  },
+  "build": {
+    "appId": "com.paywut.ebaylist",
+    "productName": "ebayList",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**"
+    ],
+    "asarUnpack": [
+      "node_modules/playwright/**",
+      "node_modules/playwright-core/**"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "identity": "-"
+    }
   }
 }

@@ -24,11 +24,10 @@ import type { AppConfig } from "./types.js"
 // > search both edit tabs + stage defaults (shipping, payment, enabled) on each
 // > wait for user (marketplace + category / skip / quit)
 // > stage category on chosen grid > save chosen > discard the other grid's staged defaults.
-export const runListingLoop = async (config: AppConfig) => {
+export const runListingLoop = async (config: AppConfig, promptUser: PromptUser = promptViaTerminal) => {
   console.log("Launching authenticated browser...")
   const context = await launchAuthenticated(config)
   console.log("Browser ready.")
-  const rl = readline.createInterface({ input, output })
 
   try {
     // The auth check already left the first tab on the Shopify products page — reuse it as the product search tab.
@@ -145,7 +144,7 @@ export const runListingLoop = async (config: AppConfig) => {
 
       // 6. Wait for the user (marketplace + category, skip, or quit). The user may
       // edit any staged default in either grid here — those edits stage on top and win.
-      const choice = await promptAction(rl, sku, title)
+      const choice = await promptUser(sku, title)
 
       if (choice.action === "quit") {
         // context.close() drops all staged (client-side) changes — no discard needed.
@@ -201,7 +200,6 @@ export const runListingLoop = async (config: AppConfig) => {
     )
   } finally {
     console.log("Closing browser...")
-    rl.close()
     await context.close()
   }
 }
@@ -282,44 +280,48 @@ const discardStaged = async (page: Page) => {
   await waitForFrameSettled(page)
 }
 
-type Action =
+export type Action =
   | { action: "list"; marketplace: "ebay" | "motors"; category: string }
   | { action: "skip" }
   | { action: "quit" }
 
-/** Shows a numbered menu for a product and returns the chosen action. */
-const promptAction = async (
-  rl: readline.Interface,
-  sku: string,
-  title: string,
-): Promise<Action> => {
+/** Asks the user what to do with a product. The Electron UI injects its own implementation. */
+export type PromptUser = (sku: string, title: string) => Promise<Action>
+
+/** Shows a numbered menu for a product and returns the chosen action (terminal default). */
+const promptViaTerminal: PromptUser = async (sku, title) => {
+  const rl = readline.createInterface({ input, output })
   const prefix = `\n${sku} — ${title || "(no title)"}`
 
-  for (;;) {
-    const answer = (
-      await rl.question(`${prefix}\n  1) List on eBay\n  2) List on eBay Motors\n  3) Skip\n  4) Quit\nSelect 1-4: `)
-    ).trim()
+  try {
+    for (;;) {
+      const answer = (
+        await rl.question(`${prefix}\n  1) List on eBay\n  2) List on eBay Motors\n  3) Skip\n  4) Quit\nSelect 1-4: `)
+      ).trim()
 
-    if (answer === "1" || answer === "2") {
-      const category = (await rl.question("Enter eBay category number: ")).trim()
+      if (answer === "1" || answer === "2") {
+        const category = (await rl.question("Enter eBay category number: ")).trim()
 
-      if (!isValidCategoryId(category)) {
-        console.log("Enter a positive eBay category number (digits only).")
-        continue
+        if (!isValidCategoryId(category)) {
+          console.log("Enter a positive eBay category number (digits only).")
+          continue
+        }
+
+        return { action: "list", marketplace: answer === "1" ? "ebay" : "motors", category }
       }
 
-      return { action: "list", marketplace: answer === "1" ? "ebay" : "motors", category }
-    }
+      if (answer === "3") {
+        return { action: "skip" }
+      }
 
-    if (answer === "3") {
-      return { action: "skip" }
-    }
+      if (answer === "4") {
+        return { action: "quit" }
+      }
 
-    if (answer === "4") {
-      return { action: "quit" }
+      console.log("Invalid selection; enter 1, 2, 3, or 4.")
     }
-
-    console.log("Invalid selection; enter 1, 2, 3, or 4.")
+  } finally {
+    rl.close()
   }
 }
 

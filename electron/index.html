@@ -1,0 +1,139 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>ebayList</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      padding: 16px;
+      gap: 12px;
+    }
+    header { display: flex; gap: 8px; align-items: center; }
+    button {
+      font: inherit;
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid rgba(127, 127, 127, 0.4);
+      background: transparent;
+      cursor: pointer;
+    }
+    button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+    button:disabled { opacity: 0.45; cursor: default; }
+    #status { margin-left: auto; opacity: 0.7; }
+    #promptCard {
+      border: 1px solid rgba(127, 127, 127, 0.4);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #promptCard.visible { display: flex; }
+    #productLabel { font-weight: 600; }
+    .promptRow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    #category {
+      font: inherit;
+      padding: 7px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(127, 127, 127, 0.4);
+      width: 160px;
+      background: transparent;
+      color: inherit;
+    }
+    #log {
+      flex: 1;
+      overflow-y: auto;
+      margin: 0;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(127, 127, 127, 0.12);
+      font: 12px/1.5 ui-monospace, Menlo, monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .err { color: #dc2626; }
+  </style>
+</head>
+<body>
+  <header>
+    <button id="authBtn">Log in to Shopify</button>
+    <button id="runBtn" class="primary">Start listing run</button>
+    <span id="status">Idle</span>
+  </header>
+
+  <div id="promptCard">
+    <div id="productLabel"></div>
+    <div class="promptRow">
+      <input id="category" inputmode="numeric" placeholder="eBay category number" />
+      <button id="listEbay" class="primary">List on eBay</button>
+      <button id="listMotors" class="primary">List on eBay Motors</button>
+      <button id="skip">Skip</button>
+      <button id="quit">Quit run</button>
+    </div>
+  </div>
+
+  <pre id="log"></pre>
+
+  <script>
+    const $ = (id) => document.getElementById(id)
+    const log = $("log")
+    const promptCard = $("promptCard")
+    const category = $("category")
+
+    const appendLog = ({ level, line }) => {
+      const span = document.createElement("span")
+      if (level === "error") span.className = "err"
+      span.textContent = line + "\n"
+      log.appendChild(span)
+      log.scrollTop = log.scrollHeight
+    }
+
+    ebayList.onLog(appendLog)
+
+    ebayList.onBusy((busy) => {
+      $("runBtn").disabled = busy
+      $("authBtn").disabled = busy
+      $("status").textContent = busy ? "Running…" : "Idle"
+      if (!busy) hidePrompt()
+    })
+
+    ebayList.onPrompt(({ sku, title }) => {
+      $("productLabel").textContent = `${sku} — ${title || "(no title)"}`
+      category.value = ""
+      promptCard.classList.add("visible")
+      category.focus()
+    })
+
+    const hidePrompt = () => promptCard.classList.remove("visible")
+
+    const respond = (action) => {
+      hidePrompt()
+      ebayList.respond(action)
+    }
+
+    const list = (marketplace) => {
+      const value = category.value.trim()
+      if (!/^\d+$/.test(value) || Number(value) <= 0) {
+        appendLog({ level: "error", line: "Enter a positive eBay category number (digits only)." })
+        category.focus()
+        return
+      }
+      respond({ action: "list", marketplace, category: value })
+    }
+
+    $("listEbay").onclick = () => list("ebay")
+    $("listMotors").onclick = () => list("motors")
+    $("skip").onclick = () => respond({ action: "skip" })
+    $("quit").onclick = () => respond({ action: "quit" })
+    $("runBtn").onclick = () => ebayList.startRun()
+    $("authBtn").onclick = () => ebayList.startAuth()
+  </script>
+</body>
+</html>

@@ -1,8 +1,23 @@
 # ebayList
 
-CLI helper for eBay listing work.
+CLI helper for eBay listing work, with a downloadable macOS app.
 
-## For non-terminal users
+## Mac app (for non-technical users)
+
+Download the `.dmg`, drag **ebayList** to Applications, and open it.
+
+The app is not notarized by Apple, so the first launch is blocked: open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to ebayList. This is needed once.
+
+In the app:
+
+1. Click **Log in to Shopify** the first time (completes login + 2FA in a Chrome window; the session is remembered).
+2. Click **Start listing run**. For each product, enter the eBay category number and choose **List on eBay**, **List on eBay Motors**, **Skip**, or **Quit run**.
+
+Google Chrome must be installed.
+
+Build the `.dmg` with `pnpm dist:mac` (output in `release/`). Run the app from source with `pnpm ui`.
+
+## For non-terminal users (from source)
 
 Double-click `Launch ebayList.command`.
 
