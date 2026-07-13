@@ -1,16 +1,11 @@
-export type CliOptions = {
-  authOnly: boolean
-  headless: boolean
+export type LaunchOptions = {
   slowMoMs: number
-  profileDir?: string // override for packaged app; CLI defaults to ./.auth/profile
 }
 
-export type AppConfig = CliOptions & {
+export type AppConfig = LaunchOptions & {
   shopDomain: string
   loginTimeoutMs: number
-  profileDir: string
   productsUrl: string
   listingsUrl: string
   motorsListingsUrl: string
-  browserChannel: "chrome" | "msedge" | undefined
 }

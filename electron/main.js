@@ -29,7 +29,7 @@ let win = null
 
 const send = (channel, payload) => win?.webContents.send(channel, payload)
 
-// The whole CLI reports via console.log/error — mirror both into the UI log pane.
+// The run loop reports via console.log/error — mirror both into the UI log pane.
 for (const level of ["log", "error"]) {
   const original = console[level].bind(console)
   console[level] = (...args) => {
@@ -81,15 +81,7 @@ ipcMain.on("activate-tab", (_event, id) => activateTab(id))
 
 // --- Browser session over CDP ----------------------------------------------
 
-const makeConfig = () =>
-  buildConfig({
-    authOnly: false,
-    headless: false,
-    slowMoMs: 250,
-    // Unused by the embedded session (Electron's default session persists login
-    // in userData itself) but the config type wants it.
-    profileDir: path.join(app.getPath("userData"), "profile"),
-  })
+const makeConfig = () => buildConfig({ slowMoMs: 250 })
 
 let session = null
 

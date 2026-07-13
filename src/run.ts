@@ -1,12 +1,8 @@
-import readline from "node:readline/promises"
-import { stdin as input, stdout as output } from "node:process"
-
 import type { Frame, Page } from "playwright"
 
 import { applyColumnLayout } from "./columns.js"
 import { applyStandardFilters } from "./filters.js"
 import { STATUS_ENABLED } from "./listings.js"
-import { isValidCategoryId } from "./categories.js"
 import { applyReturnPolicyToAllProducts, resolveMotorsReturnPolicyId } from "./returnPolicies.js"
 import { resolveImmediatePayPolicyId, setPaymentPolicy } from "./paymentPolicies.js"
 import { checkSkuListable, findNextAvailableEbaySku } from "./nextAvailableProduct.js"
@@ -15,7 +11,7 @@ import { discardGrid } from "./discard.js"
 import { openFirstShopifyProduct, searchShopifyProductsBySku } from "./shopifyProducts.js"
 import { extractProductWeightLb } from "./productWeight.js"
 import { resolveShippingPolicyId, shippingPolicyForWeightLb } from "./shippingPolicies.js"
-import { launchChromeSession, type BrowserSession, type OpenSession } from "./session.js"
+import type { BrowserSession, OpenSession } from "./session.js"
 import { waitForFrameSettled } from "./pageLoad.js"
 import type { AppConfig } from "./types.js"
 
@@ -25,11 +21,7 @@ import type { AppConfig } from "./types.js"
 // > search both edit tabs + stage defaults (shipping, payment, enabled) on each
 // > wait for user (marketplace + category / skip / quit)
 // > stage category on chosen grid > save chosen > discard the other grid's staged defaults.
-export const runListingLoop = async (
-  config: AppConfig,
-  promptUser: PromptUser = promptViaTerminal,
-  openSession: OpenSession = launchChromeSession,
-) => {
+export const runListingLoop = async (config: AppConfig, promptUser: PromptUser, openSession: OpenSession) => {
   console.log("Launching authenticated browser...")
   const session = await openSession(config)
   console.log("Browser ready.")
@@ -307,45 +299,8 @@ export type Action =
   | { action: "skip" }
   | { action: "quit" }
 
-/** Asks the user what to do with a product. The Electron UI injects its own implementation. */
+/** Asks the user what to do with a product. The Electron UI injects its implementation (prompt IPC). */
 export type PromptUser = (sku: string, title: string) => Promise<Action>
-
-/** Shows a numbered menu for a product and returns the chosen action (terminal default). */
-const promptViaTerminal: PromptUser = async (sku, title) => {
-  const rl = readline.createInterface({ input, output })
-  const prefix = `\n${sku} — ${title || "(no title)"}`
-
-  try {
-    for (;;) {
-      const answer = (
-        await rl.question(`${prefix}\n  1) List on eBay\n  2) List on eBay Motors\n  3) Skip\n  4) Quit\nSelect 1-4: `)
-      ).trim()
-
-      if (answer === "1" || answer === "2") {
-        const category = (await rl.question("Enter eBay category number: ")).trim()
-
-        if (!isValidCategoryId(category)) {
-          console.log("Enter a positive eBay category number (digits only).")
-          continue
-        }
-
-        return { action: "list", marketplace: answer === "1" ? "ebay" : "motors", category }
-      }
-
-      if (answer === "3") {
-        return { action: "skip" }
-      }
-
-      if (answer === "4") {
-        return { action: "quit" }
-      }
-
-      console.log("Invalid selection; enter 1, 2, 3, or 4.")
-    }
-  } finally {
-    rl.close()
-  }
-}
 
 const openCodistoPage = async (session: BrowserSession, productsUrl: string, label: string): Promise<Page> => {
   const page = await session.newPage(label)

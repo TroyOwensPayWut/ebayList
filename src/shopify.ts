@@ -1,61 +1,8 @@
-import fs from "node:fs/promises"
+import type { Page } from "playwright"
 
-import { chromium, type BrowserContext, type Page } from "playwright"
-
-import { TIMEOUT_MS } from "./timeout.js"
 import type { AppConfig } from "./types.js"
 
-// Launch the persistent Chromium profile, ensure Shopify is logged in, and return
-// the OPEN context. Caller owns closing it (used by the listing loop, which keeps
-// the browser open across many tabs). checkAuth/runAuthOnly below close their own.
-export const launchAuthenticated = async (config: AppConfig): Promise<BrowserContext> => {
-  await fs.mkdir(config.profileDir, { recursive: true })
-
-  const context = await chromium.launchPersistentContext(config.profileDir, {
-    channel: config.browserChannel,
-    headless: config.headless,
-    slowMo: config.slowMoMs,
-    viewport: { width: 1440, height: 960 },
-    chromiumSandbox: true,
-    args: ["--disable-blink-features=AutomationControlled", "--test-type"],
-  })
-  context.setDefaultTimeout(TIMEOUT_MS)
-  context.setDefaultNavigationTimeout(TIMEOUT_MS)
-
-  try {
-    await context.addInitScript("window.__name = function(fn) { return fn; };")
-    const page = context.pages()[0] ?? (await context.newPage())
-    await ensureLoggedIn(page, config)
-    return context
-  } catch (error) {
-    await context.close()
-    throw error
-  }
-}
-
-export const runAuthOnly = async (config: AppConfig) => {
-  await fs.mkdir(config.profileDir, { recursive: true })
-
-  const context = await chromium.launchPersistentContext(config.profileDir, {
-    channel: config.browserChannel,
-    headless: false,
-    slowMo: config.slowMoMs,
-    viewport: { width: 1440, height: 960 },
-    chromiumSandbox: true,
-    args: ["--disable-blink-features=AutomationControlled", "--test-type"],
-  })
-  context.setDefaultTimeout(TIMEOUT_MS)
-  context.setDefaultNavigationTimeout(TIMEOUT_MS)
-
-  try {
-    await context.addInitScript("window.__name = function(fn) { return fn; };")
-    const page = context.pages()[0] ?? (await context.newPage())
-    await ensureLoggedIn(page, { ...config, headless: false })
-  } finally {
-    await context.close()
-  }
-}
-
+/** Navigates to the Shopify products page and, if not logged in, waits for the user to finish the login/2FA in the tab. */
 export const ensureLoggedIn = async (page: Page, config: AppConfig) => {
   await page.goto(config.productsUrl, { waitUntil: "domcontentloaded" })
 
@@ -63,11 +10,7 @@ export const ensureLoggedIn = async (page: Page, config: AppConfig) => {
     return
   }
 
-  if (config.headless) {
-    throw new Error("Shopify is not authenticated. Re-run without --headless and complete the login manually.")
-  }
-
-  console.log("Complete the Shopify login in the opened browser window. The local browser profile will remember the session for future runs.")
+  console.log("Complete the Shopify login in the Shopify tab. The session is remembered for future runs.")
   await waitForAuthenticatedAdmin(page, config)
 }
 

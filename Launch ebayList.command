@@ -49,13 +49,8 @@ if [ ! -d "node_modules" ]; then
   run env CI=true pnpm install
 fi
 
-if [ ! -d ".auth/profile" ]; then
-  echo "Opening Shopify login..."
-  run pnpm auth
-else
-  echo "Checking saved Shopify session..."
-  run pnpm start
-fi
+echo "Opening the ebayList app..."
+run pnpm ui
 
 echo
 echo "Done."
