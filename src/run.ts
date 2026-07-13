@@ -3,6 +3,7 @@ import { stdin as input, stdout as output } from "node:process"
 
 import type { Frame, Page } from "playwright"
 
+import { applyColumnLayout } from "./columns.js"
 import { applyStandardFilters } from "./filters.js"
 import { STATUS_ENABLED } from "./listings.js"
 import { isValidCategoryId } from "./categories.js"
@@ -44,6 +45,23 @@ export const runListingLoop = async (
     const motorsEditPage = await openCodistoPage(session, config.motorsListingsUrl, "Motors edit") // Motors SKU search + edit
     console.log("eBay Motors edit tab ready.")
     const googlePage = await session.newPage("Google") // reused each loop for the category lookup
+
+    // Reduce both edit grids to the listing columns (status, title, price, quantity,
+    // Best Offer, category, policies, condition). Failures are non-fatal — the loop
+    // reads/writes the dataSet, not the visible columns, so worse layout ≠ broken run.
+    console.log("Applying the listing column layout to both edit tabs...")
+    for (const [label, page] of [
+      ["eBay edit", editPage],
+      ["eBay Motors edit", motorsEditPage],
+    ] as const) {
+      await waitForFrameSettled(page)
+      const layout = await applyColumnLayout(await getListingsFrame(page))
+      if (layout.ok) {
+        console.log(`${label}: listing columns applied (${layout.hidden} hidden, ${layout.shown} shown).`)
+      } else {
+        console.error(`${label}: column layout failed — continuing with current columns. (${layout.error})`)
+      }
+    }
 
     console.log("Applying standard filters (Has images, quantity >= 1, payment policy not set)...")
     await waitForFrameSettled(searchPage)

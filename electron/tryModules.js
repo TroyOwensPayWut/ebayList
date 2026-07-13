@@ -2,6 +2,7 @@
 // Exercises every browser-touching module through the Electron embedded browser
 // (real CDP session from main.js). NOTHING is ever committed to Codisto:
 // writes are stage-only and dropped with discardGrid / session close.
+import { applyColumnLayout } from "../dist/columns.js"
 import { applyStandardFilters } from "../dist/filters.js"
 import { waitForFrameSettled } from "../dist/pageLoad.js"
 import { getListingsFrame, searchForSku, findRowIndex, setAndCommit } from "../dist/grid.js"
@@ -155,6 +156,20 @@ export const runModuleTests = async ({ openSession, makeConfig, app }) => {
     await waitForFrameSettled(motorsPage)
     ebayEditFrame = await getListingsFrame(editPage)
     motorsEditFrame = await getListingsFrame(motorsPage)
+  })
+
+  // 7b. columns.ts: reduce both edit grids to the listing columns (client-side
+  // layout only — later grid/staging tests then also prove the reduced layout
+  // doesn't break searching or dataSet writes)
+  await test("columns: applyColumnLayout on eBay edit + Motors grids", async () => {
+    if (!ebayEditFrame || !motorsEditFrame) throw new Error("edit frames unavailable")
+    const notes = []
+    for (const [label, frame] of [["eBay", ebayEditFrame], ["Motors", motorsEditFrame]]) {
+      const layout = await applyColumnLayout(frame)
+      if (!layout.ok) throw new Error(`${label}: ${layout.error}`)
+      notes.push(`${label}: ${layout.hidden} hidden, ${layout.shown} shown, visible: ${layout.keptVisible.length} keeps`)
+    }
+    return notes.join("; ")
   })
 
   // 8. policy resolvers (read-only dropdown reads)
