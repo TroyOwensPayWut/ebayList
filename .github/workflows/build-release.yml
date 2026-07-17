@@ -1,14 +1,15 @@
 name: Build & Release (latest)
 
-# Build a fresh macOS DMG on every push to main and publish it as a
-# rolling "latest" pre-release. Each run replaces the previous one so
-# there is always exactly one downloadable build of the newest main.
+# Build fresh macOS + Windows installers on every push to main and publish
+# them as a single rolling "latest" pre-release. Each run replaces the
+# previous one, so there is always exactly one downloadable build of the
+# newest main for each platform.
 on:
   push:
     branches: [main]
   workflow_dispatch: {} # allow manual runs from the Actions tab
 
-# Only one build at a time; cancel an in-progress build if a newer
+# Only one build pipeline at a time; cancel an in-progress one if a newer
 # commit lands on main.
 concurrency:
   group: build-release-latest
@@ -18,8 +19,17 @@ permissions:
   contents: write # needed to create/replace the GitHub Release + tag
 
 jobs:
+  # 1) Build each platform on its native runner and stash the installer.
   build:
-    runs-on: macos-latest # a macOS DMG must be built on macOS
+    strategy:
+      fail-fast: false # let Windows finish even if macOS fails, and vice versa
+      matrix:
+        include:
+          - os: macos-latest # a .dmg must be built on macOS
+            target: mac
+          - os: windows-latest # a Windows .exe is built on Windows
+            target: win
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,25 +48,50 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build DMG
-        # tsc + electron-builder --mac. --publish never keeps
-        # electron-builder from trying to manage the release itself;
-        # we upload the artifact ourselves below.
-        run: pnpm exec tsc && pnpm exec electron-builder --mac --publish never
+      - name: Build installer
+        # tsc + electron-builder. --publish never keeps electron-builder from
+        # managing the release itself; the release job below uploads instead.
+        # bash is available on all runners (Git Bash on Windows) so the
+        # command is identical across the matrix.
+        shell: bash
+        run: pnpm exec tsc && pnpm exec electron-builder --${{ matrix.target }} --publish never
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.target }}
+          path: |
+            release/*.dmg
+            release/*.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  # 2) Once both builds succeed, publish/replace the single "latest" release.
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all installers
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true # flatten every installer-* artifact into ./artifacts
 
       - name: Publish rolling "latest" release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
 
-          # Remove the previous "latest" release and its tag so the new
-          # build fully replaces it (and the tag points at this commit).
-          gh release delete latest --yes --cleanup-tag || true
+          # Remove the previous "latest" release and its tag so the new build
+          # fully replaces it (and the tag points at this commit).
+          gh release delete latest --repo "$REPO" --yes --cleanup-tag || true
 
           gh release create latest \
+            --repo "$REPO" \
             --prerelease \
             --title "Latest main build" \
             --target "$GITHUB_SHA" \
             --notes "Automated build from commit ${GITHUB_SHA}. This pre-release is replaced on every push to main." \
-            release/*.dmg
+            artifacts/*.dmg artifacts/*.exe
