@@ -36,6 +36,7 @@
       "node_modules/playwright-core/**"
     ],
     "mac": {
+      "icon": "build/icon.png",
       "target": [
         {
           "target": "dmg",
@@ -47,6 +48,7 @@
       "identity": "-"
     },
     "win": {
+      "icon": "build/icon.png",
       "target": [
         {
           "target": "nsis",
